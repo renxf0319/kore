@@ -55,14 +55,28 @@ Markdown 解析跑在 Web Worker 里，预览永远跟手。
 
 ---
 
+## 环境要求
+
+- **Node.js 18+**（推荐 20 / 22 LTS）。Vite 5 从 v5 起就不再支持 Node 16 及更早版本。
+  本项目用 [fnm](https://github.com/Schniz/fnm) 固定版本，见 `.node-version`（当前 `22.23.3`）。
+  执行 `scripts\dev.cmd` 会自动切到该版本启动，**完全不影响系统里其他项目使用的 Node**。
+- 只有需要**桌面端（Tauri）**时才需要 Rust 工具链，见下文。
+
+> ⚠️ 若你在 Node 16 下直接跑 `npm run dev`，会看到
+> `TypeError: crypto$2.getRandomValues is not a function` —— 这是 Node 版本太旧，不是代码问题。
+> 项目已内置前置检查（`scripts/check-node.mjs`），会直接给出明确提示而不是让人去猜。
+
+---
+
 ## 快速开始
 
 ### 浏览器模式（无需安装，立即体验）
 
-```bash
+```cmd
 npm install
-npm run dev
-# 打开 http://localhost:5173 → 点击「打开文件夹」选择任意本地目录
+scripts\dev.cmd        REM 用 .node-version 指定的 Node 跑 Vite（推荐）
+REM 或：npm run dev    REM 等价写法，前提是当前 Node ≥ 18
+REM 打开 http://localhost:5173 → 点击「打开文件夹」选择任意本地目录
 ```
 
 > 浏览器模式使用 File System Access API，推荐 Chrome / Edge 等支持的浏览器。
@@ -103,8 +117,9 @@ powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1
 
 ### 1. 秒级热更（浏览器模式，日常最推荐）
 
-```bash
-npm run dev          # 启动 Vite，HMR 毫秒级生效
+```cmd
+scripts\dev.cmd        REM 用 .node-version 指定的 Node 启动 Vite，HMR 毫秒级生效
+npm run dev            REM 等价写法（要求当前 Node ≥ 18）
 ```
 
 打开 http://localhost:5173 ，点「打开文件夹」选一个本地目录就能写。
@@ -112,14 +127,16 @@ npm run dev          # 启动 Vite，HMR 毫秒级生效
 
 ### 2. 桌面端热更（真窗口，验证 Tauri 相关功能）
 
-```bash
-npm run dev:desktop        # = tauri dev：拉起 Vite + 打开原生窗口，保存即热更
+```cmd
+scripts\dev-desktop.cmd      REM 一键：切 Node 版本 + 注入 Rust 工具链环境 + 打开原生窗口
+npm run dev:desktop          REM 等价写法（需已装 Rust 且环境变量就绪）
 ```
 
-或用附带的启动脚本（会自动识别你用 `install-rust.ps1` 选的工具链盘符并注入
-`CARGO_HOME` / `RUSTUP_HOME`，即使当前终端还没读到用户级环境变量也能直接跑）：
+启动脚本会自动完成两件事：把 Node 切到 `.node-version` 指定的版本；识别你用
+`install-rust.ps1` 选的工具链盘符并注入 `CARGO_HOME` / `RUSTUP_HOME`——即使当前终端
+还没读到用户级环境变量也能直接跑。PowerShell 用户可直接：
 
-```bash
+```powershell
 powershell -ExecutionPolicy Bypass -File scripts/dev-desktop.ps1
 ```
 
@@ -141,6 +158,28 @@ npm run preview        # 本地预览 dist 产物
 - Vite HMR 对 React 组件、CSS 变量、Markdown 样式都即时生效，改样式几乎零等待。
 - 想快速看某个 Markdown 文档的渲染效果：`npm run dev` 后在浏览器里打开它即可。
 - 只想确认「类型 / 构建有没有坏」：跑 `npm run typecheck`，不启动任何服务。
+
+### Node 版本管理（fnm）
+
+本机用 **fnm** 管理 Node 版本，与系统里其他项目用的 Node **互不干扰**：
+
+| 项目 | 位置 |
+| --- | --- |
+| fnm 可执行文件 | `E:\tools\fnm\fnm.exe` |
+| Node 版本目录（`FNM_DIR`） | `E:\fnm-data\node-versions\` |
+| 已安装版本 | `v22.23.3`（本项目用）、`v16.20.2`（老项目用） |
+
+常用命令：
+
+```cmd
+fnm list                 REM 看已安装的版本
+fnm use 22.23.3          REM 在当前终端切到 22（只影响这个终端）
+fnm install 20.18.0      REM 装一个新版本（走 npmmirror 镜像）
+```
+
+> 终端里 `cd` 进本项目时若想**自动**切版本，需在 shell 里做一次初始化
+> （`fnm env --use-on-cd`）；本项目提供的 `scripts\dev.cmd` 已经替你做了这件事，
+> 所以直接用它即可，无需改任何 shell 配置。
 
 ---
 
@@ -189,9 +228,13 @@ kore/
 │  ├─ src/commands.rs    # read_dir / read_file / write_file
 │  ├─ tauri.conf.json
 │  └─ capabilities/      # 权限声明
+├─ .node-version         # 固定本项目的 Node 版本（fnm / asdf / volta 均识别）
+├─ scripts/dev.cmd       # 一键启动浏览器模式开发（自动切换 Node 版本）
+├─ scripts/dev-desktop.cmd   # 一键启动 Tauri 桌面端开发
+├─ scripts/dev-desktop.ps1   # 同上（PowerShell 版，注入 Rust 工具链环境变量）
+├─ scripts/check-node.mjs    # Node 版本前置检查（版本过低时给出明确提示）
 ├─ scripts/gen_icons.py  # 生成全套应用图标
 ├─ scripts/install-rust.ps1  # 交互式选择盘符安装 Rust 工具链（不写 C 盘）
-├─ scripts/dev-desktop.ps1  # 一键启动桌面端开发（自动注入工具链环境变量，热更）
 ├─ scripts/push-to-github.ps1  # 一键建仓并推送到 GitHub（在本机联网环境运行）
 └─ package.json
 ```

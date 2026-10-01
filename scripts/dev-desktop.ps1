@@ -86,4 +86,18 @@ Write-Host "[dev] Starting Tauri dev (Vite HMR + native window, hot reload on sa
 Write-Host "[dev] Close the app window (or press Ctrl+C here) to stop."
 Write-Host ""
 
+# --- Pin the Node version (keeps the system-wide Node untouched) -------------
+$nodeVersion = '22.23.3'
+$vnFile = Join-Path $repo '.node-version'
+if (Test-Path $vnFile) { $nodeVersion = (Get-Content $vnFile -Raw).Trim() }
+$fnmData = if ($env:FNM_DIR) { $env:FNM_DIR } else { 'E:\fnm-data' }
+$nodeDir = Join-Path $fnmData "node-versions\v$nodeVersion\installation"
+if (Test-Path (Join-Path $nodeDir 'node.exe')) {
+  $env:Path = "$nodeDir;$env:Path"
+  $nv = & (Join-Path $nodeDir 'node.exe') -v
+  Write-Host "[dev] node $nv  ($nodeDir)"
+} else {
+  Write-Host "[dev] Node $nodeVersion not found under $fnmData; using PATH default." -ForegroundColor Yellow
+}
+
 npm run tauri dev

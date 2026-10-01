@@ -6,13 +6,19 @@
   "description": "Kore · 极速本地 Markdown 编辑器（开源 / 无云同步）",
   "license": "MIT",
   "scripts": {
+    "predev": "node scripts/check-node.mjs",
     "dev": "vite",
+    "predev:desktop": "node scripts/check-node.mjs",
     "dev:desktop": "tauri dev",
+    "prebuild": "node scripts/check-node.mjs",
     "build": "tsc --noEmit && vite build",
     "build:desktop": "tauri build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.1",
