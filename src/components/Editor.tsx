@@ -83,7 +83,10 @@ export default function Editor() {
 
     const view = new EditorView({ state, parent: host.current })
     return () => view.destroy()
-  }, [active, theme, tabs, updateContent, saveActive])
+    // 仅依赖 active / theme：切换文件或主题时重建视图；
+    // 输入时 updateContent 会改变 tabs，但绝不能重建视图（否则光标跳动/卡顿）。
+    // updateContent / saveActive 来自 zustand，引用稳定，active 在重建时已是最新值。
+  }, [active, theme])
 
   return <div className="editor-pane no-print" ref={host} />
 }
