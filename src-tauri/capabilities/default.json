@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Kore 默认能力：核心权限 + 文件夹选择对话框 + 自定义文件系统命令",
+  "description": "Kore 默认能力：核心权限 + 文件夹选择对话框。应用自身的命令（read_dir/read_file/write_file）默认允许，无需在此声明。",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,9 +9,6 @@
     "core:window:default",
     "core:app:default",
     "dialog:default",
-    "dialog:allow-open",
-    "kore:allow-read-dir",
-    "kore:allow-read-file",
-    "kore:allow-write-file"
+    "dialog:allow-open"
   ]
 }
