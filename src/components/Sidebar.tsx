@@ -16,7 +16,6 @@ export default function Sidebar() {
   const toggleExpand = useStore((s) => s.toggleExpand)
   const openFile = useStore((s) => s.openFile)
   const active = useStore((s) => s.active)
-  const openFolder = useStore((s) => s.openFolder)
 
   const Node = ({ node }: { node: FileNode }) => {
     const isOpen = expanded[node.path]
@@ -53,9 +52,8 @@ export default function Sidebar() {
     <aside className="sidebar no-print">
       <div className="sidebar-head">
         <span>资源管理器</span>
-        <button onClick={() => void openFolder()}>打开</button>
       </div>
-      {rootPath ? (
+      {rootPath && (
         <div className="tree">
           <div className="tree-row" onClick={() => toggleExpand(rootPath)}>
             {expanded[rootPath] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -69,11 +67,6 @@ export default function Sidebar() {
               ))}
             </div>
           )}
-        </div>
-      ) : (
-        <div className="sidebar-empty">
-          <p>尚未打开文件夹</p>
-          <button onClick={() => void openFolder()}>打开本地文件夹</button>
         </div>
       )}
     </aside>

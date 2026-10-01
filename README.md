@@ -116,7 +116,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1
 > Windows 上默认的 MSVC 编译目标需要 **Visual Studio 生成工具（C++ 桌面开发 workload）** 提供链接器 `link.exe`。
 > 该工具由微软安装、默认落在 C:，属于外部环境依赖、不在 Kore 控制范围内；本脚本只保证
 > **Rust 工具链与 crate 缓存不落 C 盘**。
-> 图标已通过 `scripts/gen_icons.py` 生成全套，无需再跑 `tauri icon`。
+> 图标已由 `scripts/gen_logo.py` 从品牌源图生成全套（含 .ico / .icns），无需再跑 `tauri icon`。
 
 ---
 
@@ -232,13 +232,15 @@ git push -u origin master
 ```
 kore/
 ├─ src/                  # React 前端
+│  ├─ assets/            # logo-mark / logo-wordmark（明暗两套，由 gen_logo.py 生成）
 │  ├─ components/        # Toolbar / Sidebar / Tabs / Editor / Preview / Outline / StatusBar ...
-│  ├─ lib/               # fs(双模桥) / markdown / outline / export / theme / slug
+│  ├─ lib/               # fs(双模桥) / markdown / outline / export / theme / slug / logo
 │  ├─ workers/           # markdown.worker.ts（Worker 中解析 Markdown）
 │  ├─ state/             # Zustand store
 │  └─ styles/            # tokens.css(主题变量) / global.css
 ├─ src-tauri/            # Rust 后端（Tauri 2）
 │  ├─ src/commands.rs    # read_dir / read_file / write_file
+│  ├─ icons/             # 应用图标全套（由 gen_logo.py 生成）
 │  ├─ tauri.conf.json
 │  └─ capabilities/      # 权限声明
 ├─ .node-version         # 固定本项目的 Node 版本（fnm / asdf / volta 均识别）
@@ -247,11 +249,15 @@ kore/
 ├─ scripts/dev-desktop.cmd   # 一键启动 Tauri 桌面端开发
 ├─ scripts/dev-desktop.ps1   # 同上（PowerShell 版，注入 Rust 工具链环境变量）
 ├─ scripts/check-node.mjs    # Node 版本前置检查（版本过低时给出明确提示）
-├─ scripts/gen_icons.py  # 生成全套应用图标
+├─ scripts/gen_logo.py   # 从品牌源图生成 logo 资源 + 应用图标（需 Pillow、numpy）
 ├─ scripts/install-rust.ps1  # 交互式选择盘符安装 Rust 工具链（不写 C 盘）
 ├─ scripts/push-to-github.ps1  # 一键建仓并推送到 GitHub（在本机联网环境运行）
 └─ package.json
 ```
+
+> **换 logo**：`python scripts/gen_logo.py <新源图>` 会一次性刷新
+> `src/assets/logo-{mark,wordmark}-{light,dark}.png` 与 `src-tauri/icons/` 应用图标全套。
+> 命令行参数里的量测常量（`BOX_WORDMARK` / `BOX_MARK`）对应源图的裁切范围，换图时需按新图调整。
 
 ## 路线图
 

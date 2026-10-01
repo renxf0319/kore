@@ -70,15 +70,19 @@ button.icon {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  gap: 7px;
 }
-.brand .logo {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, #6366f1, #4338ca);
+.brand-mark {
+  height: 20px;
+  width: auto;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.brand-name {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.2px;
 }
 .toolbar .spacer {
   flex: 1;
@@ -97,18 +101,11 @@ button.icon {
 .sidebar-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 10px 12px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--fg-muted);
-}
-.sidebar-head button {
-  padding: 2px 8px;
-  font-size: 12px;
-  text-transform: none;
-  letter-spacing: 0;
 }
 .tree {
   padding: 0 6px 12px;
@@ -138,16 +135,6 @@ button.icon {
 }
 .root-name {
   font-weight: 600;
-}
-.sidebar-empty {
-  padding: 24px 16px;
-  color: var(--fg-muted);
-  text-align: center;
-}
-.sidebar-empty button {
-  margin-top: 10px;
-  width: 100%;
-  justify-content: center;
 }
 
 /* ---------------- 标签页 ---------------- */
@@ -417,35 +404,21 @@ button.icon {
   max-width: 440px;
   padding: 24px;
 }
-.welcome-logo {
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
-  margin: 0 auto 16px;
-  background: linear-gradient(135deg, #6366f1, #4338ca);
-}
-.welcome-card h1 {
-  margin: 0;
-  font-size: 32px;
+.welcome-wordmark {
+  height: 46px;
+  width: auto;
+  display: block;
+  margin: 0 auto 18px;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 .welcome-card .subtitle {
   color: var(--fg-muted);
-  margin: 8px 0 24px;
-}
-.welcome-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-.welcome-actions .primary {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border: none;
-  padding: 10px 18px;
+  margin: 0 0 20px;
   font-size: 15px;
 }
-.welcome-actions .hint {
+.welcome-card .hint {
+  margin: 0;
   color: var(--fg-muted);
   font-size: 13px;
 }

@@ -21,3 +21,6 @@ Thumbs.db
 
 # vite 打包配置时的临时文件
 vite.config.ts.timestamp-*.mjs
+
+# 本地草稿区（临时脚本、截图、调试用浏览器 profile）
+.work/

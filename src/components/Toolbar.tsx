@@ -1,5 +1,6 @@
 import { useStore } from '../state/store'
 import { exportPdf, exportHtml } from '../lib/export'
+import { markSrc } from '../lib/logo'
 import {
   FolderOpen,
   FilePlus,
@@ -27,8 +28,8 @@ export default function Toolbar() {
   return (
     <header className="toolbar no-print">
       <div className="brand">
-        <span className="logo" />
-        Kore
+        <img className="brand-mark" src={markSrc(theme)} alt="Kore" />
+        <span className="brand-name">Kore</span>
       </div>
       <div className="spacer" />
       <button onClick={() => void openFolder()}>
