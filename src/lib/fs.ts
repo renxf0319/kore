@@ -61,26 +61,34 @@ function segs(p: string): string[] {
   return p.split('/').filter(Boolean)
 }
 
-async function dirFrom(
-  handle: FileSystemDirectoryHandle,
-  rel: string
+// 浏览器模式没有真正的绝对路径，统一用「虚拟路径」：
+//   根 === root.name（例如 "gateway"），子项一律拼成 "gateway/gateway/技术方案"。
+// 于是路径的第一段**永远**是根名。解析时先剥掉这一段，剩下的才是相对段。
+// 生成与解析必须共用这一条规则 —— 之前生成子项时漏掉了根名前缀，
+// 导致解析时按字符串长度硬切，切出的相对路径是错的（展开子目录会报找不到目录）。
+function relParts(root: FileSystemDirectoryHandle, path: string): string[] {
+  const parts = segs(path)
+  return parts[0] === root.name ? parts.slice(1) : parts
+}
+
+async function dirAt(
+  root: FileSystemDirectoryHandle,
+  parts: string[]
 ): Promise<FileSystemDirectoryHandle> {
-  let h = handle
-  for (const part of segs(rel)) {
-    h = await h.getDirectoryHandle(part)
-  }
+  let h = root
+  for (const part of parts) h = await h.getDirectoryHandle(part)
   return h
 }
 
 async function browserList(path: string): Promise<FileNode[]> {
   await ensurePerm()
   const root = rootHandle!
-  const handle = path === root.name ? root : await dirFrom(root, path.slice(root.name.length))
+  const handle = await dirAt(root, relParts(root, path))
   const out: FileNode[] = []
   for await (const [name, entry] of handle.entries()) {
     out.push({
       name,
-      path: path === root.name ? name : `${path}/${name}`,
+      path: `${path}/${name}`,
       isDir: entry.kind === 'directory',
     })
   }
@@ -93,9 +101,11 @@ async function browserList(path: string): Promise<FileNode[]> {
 async function browserRead(path: string): Promise<string> {
   await ensurePerm()
   const root = rootHandle!
-  const parts = segs(path.slice(root.name.length))
-  const dir = await dirFrom(root, parts.slice(0, -1).join('/'))
-  const fh = await dir.getFileHandle(parts[parts.length - 1])
+  const parts = relParts(root, path)
+  const fileName = parts.pop()
+  if (!fileName) throw new Error('无效的文件路径')
+  const dir = await dirAt(root, parts)
+  const fh = await dir.getFileHandle(fileName)
   const file = await fh.getFile()
   return file.text()
 }
@@ -103,9 +113,11 @@ async function browserRead(path: string): Promise<string> {
 async function browserWrite(path: string, content: string): Promise<void> {
   await ensurePerm()
   const root = rootHandle!
-  const parts = segs(path.slice(root.name.length))
-  const dir = await dirFrom(root, parts.slice(0, -1).join('/'))
-  const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true })
+  const parts = relParts(root, path)
+  const fileName = parts.pop()
+  if (!fileName) throw new Error('无效的文件路径')
+  const dir = await dirAt(root, parts)
+  const fh = await dir.getFileHandle(fileName, { create: true })
   const w = await fh.createWritable()
   await w.write(content)
   await w.close()

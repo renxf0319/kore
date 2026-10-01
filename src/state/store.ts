@@ -12,6 +12,29 @@ export interface Notice {
 }
 
 function errText(e: unknown): string {
+  // 浏览器的文件系统 API 抛的都是英文 DOMException，直接显示对用户毫无意义
+  if (e instanceof DOMException) {
+    switch (e.name) {
+      case 'NotFoundError':
+        return '找不到该文件或目录（可能已被移动、重命名或删除）'
+      case 'NotAllowedError':
+        return '浏览器拒绝了该操作'
+      case 'SecurityError':
+        return '缺少文件夹读写权限，需要重新授权'
+      case 'TypeMismatchError':
+        return '已存在同名的文件或文件夹'
+      case 'InvalidModificationError':
+        return '该操作不被允许（目标文件夹非空等）'
+      case 'NoModificationAllowedError':
+        return '文件被占用或只读'
+      case 'QuotaExceededError':
+        return '磁盘空间不足'
+      case 'AbortError':
+        return '操作已取消'
+      default:
+        return `${e.name}：${e.message}`
+    }
+  }
   if (e instanceof Error) return e.message
   return String(e)
 }
