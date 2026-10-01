@@ -49,7 +49,13 @@ jobs:
             libssl-dev
 
       - name: Install frontend dependencies
-        run: npm install
+        shell: bash
+        # 说明：package-lock.json 若在单一平台生成，只会固化该平台的原生 optional 依赖
+        # （esbuild/rollup 的平台二进制，npm bug #4828），导致其它平台构建时找不到原生模块。
+        # 因此这里删除 lock，让每个 runner 按自身平台重新解析安装。
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --no-fund
 
       - name: Build app and upload to release
         uses: tauri-apps/tauri-action@v0
