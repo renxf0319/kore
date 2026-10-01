@@ -137,6 +137,45 @@ button.icon {
   font-weight: 600;
 }
 
+/* ---------------- 顶部提示条 ---------------- */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.banner.info {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+  color: var(--fg);
+}
+.banner.error {
+  background: color-mix(in srgb, #d9534f 14%, var(--bg-elev));
+  color: var(--fg);
+}
+.banner-text {
+  flex: 1;
+}
+.banner-action {
+  padding: 3px 10px;
+  font-size: 12px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.banner-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  background: transparent;
+  border: none;
+  opacity: 0.6;
+}
+.banner-close:hover {
+  opacity: 1;
+}
+
 /* ---------------- 标签页 ---------------- */
 .tabs {
   display: flex;

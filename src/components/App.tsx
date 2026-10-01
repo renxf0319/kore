@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '../state/store'
+import Banner from './Banner'
 import Toolbar from './Toolbar'
 import Sidebar from './Sidebar'
 import Tabs from './Tabs'
@@ -22,6 +23,7 @@ export default function App() {
   return (
     <div className="app">
       <Toolbar />
+      <Banner />
       <div className="body">
         <Sidebar />
         <div className="main">

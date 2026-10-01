@@ -20,9 +20,28 @@ export default function Toolbar() {
   const tabs = useStore((s) => s.tabs)
   const previewHtml = useStore((s) => s.previewHtml)
 
+  const setNotice = useStore((s) => s.setNotice)
+
   const onExportHtml = () => {
     const tab = tabs.find((t) => t.path === active)
-    if (tab) void exportHtml(tab.path, previewHtml, theme)
+    if (!tab) return
+    exportHtml(tab.path, previewHtml, theme).catch((e: unknown) =>
+      setNotice({
+        kind: 'error',
+        text: `导出 HTML 失败：${e instanceof Error ? e.message : String(e)}`,
+      })
+    )
+  }
+
+  const onExportPdf = () => {
+    try {
+      exportPdf()
+    } catch (e) {
+      setNotice({
+        kind: 'error',
+        text: `导出 PDF 失败：${e instanceof Error ? e.message : String(e)}`,
+      })
+    }
   }
 
   return (
@@ -41,7 +60,7 @@ export default function Toolbar() {
       <button onClick={onExportHtml} disabled={!active}>
         <FileType size={16} /> 导出 HTML
       </button>
-      <button onClick={exportPdf} disabled={!active}>
+      <button onClick={onExportPdf} disabled={!active}>
         <FileDown size={16} /> 导出 PDF
       </button>
       <button className="icon" onClick={toggleTheme} title="切换主题">

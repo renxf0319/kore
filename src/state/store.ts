@@ -3,6 +3,23 @@ import type { OpenTab, ThemeMode } from '../lib/types'
 import { fsApi, isTauri } from '../lib/fs'
 import { applyTheme, getStoredTheme } from '../lib/theme'
 
+// 用户可见的提示（取代从前"点什么都没反应"的静默失败）
+export interface Notice {
+  kind: 'info' | 'error'
+  text: string
+  // 需要用户手势才能完成的动作，交给界面渲染成按钮
+  action?: 'regrant'
+}
+
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message
+  return String(e)
+}
+
+function isAbort(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError'
+}
+
 interface AppState {
   theme: ThemeMode
   mode: 'tauri' | 'browser' | 'unknown'
@@ -14,8 +31,11 @@ interface AppState {
   active: string | null
   previewHtml: string
   ready: boolean
+  notice: Notice | null
 
   init: () => Promise<void>
+  setNotice: (n: Notice | null) => void
+  regrantRoot: () => Promise<void>
   setTheme: (t: ThemeMode) => void
   toggleTheme: () => void
   openFolder: () => Promise<void>
@@ -41,18 +61,55 @@ export const useStore = create<AppState>((set, get) => ({
   active: null,
   previewHtml: '',
   ready: false,
+  notice: null,
 
   async init() {
     const theme = getStoredTheme()
     applyTheme(theme)
     const mode = isTauri ? 'tauri' : 'browser'
     set({ theme, mode })
-    const root = await fsApi.restore()
-    if (root) {
-      set({ rootPath: root, rootName: rootNameOf(root) })
-      await get().loadDir(root)
+    try {
+      const restored = await fsApi.restore()
+      if (restored) {
+        set({ rootPath: restored.name, rootName: rootNameOf(restored.name) })
+        if (restored.granted) {
+          await get().loadDir(restored.name)
+        } else {
+          // 句柄还在，但浏览器要求由用户手势重新授权 —— 这在每次新开页面时都会发生，
+          // 必须给出明确入口，否则所有文件操作都会静默失败。
+          set({
+            notice: {
+              kind: 'info',
+              text: `上次打开的「${restored.name}」需要重新授权才能读写`,
+              action: 'regrant',
+            },
+          })
+        }
+      }
+    } catch (e) {
+      set({ notice: { kind: 'error', text: `恢复上次的文件夹失败：${errText(e)}` } })
     }
     set({ ready: true })
+  },
+
+  setNotice(n) {
+    set({ notice: n })
+  },
+
+  async regrantRoot() {
+    const ok = await fsApi.regrant()
+    if (!ok) {
+      set({
+        notice: {
+          kind: 'error',
+          text: '授权未通过。可以点击工具栏「打开文件夹」重新选择目录。',
+        },
+      })
+      return
+    }
+    const root = get().rootPath
+    set({ notice: null })
+    if (root) await get().loadDir(root)
   },
 
   setTheme(t) {
@@ -67,11 +124,16 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async openFolder() {
-    const p = await fsApi.pickFolder()
-    if (!p) return
-    set({ rootPath: p, rootName: rootNameOf(p), expanded: { [p]: true } })
-    await fsApi.persistRoot(p)
-    await get().loadDir(p)
+    try {
+      const p = await fsApi.pickFolder()
+      if (!p) return
+      set({ rootPath: p, rootName: rootNameOf(p), expanded: { [p]: true }, notice: null })
+      await fsApi.persistRoot(p)
+      await get().loadDir(p)
+    } catch (e) {
+      if (isAbort(e)) return // 用户在系统窗口里点了取消，不是错误
+      set({ notice: { kind: 'error', text: `打开文件夹失败：${errText(e)}` } })
+    }
   },
 
   async loadDir(path) {
@@ -79,7 +141,18 @@ export const useStore = create<AppState>((set, get) => ({
       const list = await fsApi.listDir(path)
       set((s) => ({ dirs: { ...s.dirs, [path]: list }, expanded: { ...s.expanded, [path]: true } }))
     } catch (e) {
-      console.error('读取目录失败', e)
+      const msg = errText(e)
+      if (fsApi.hasRestoredHandle() && /user gesture|权限|Permission/i.test(msg)) {
+        set({
+          notice: {
+            kind: 'info',
+            text: `读取「${rootNameOf(path)}」需要重新授权`,
+            action: 'regrant',
+          },
+        })
+        return
+      }
+      set({ notice: { kind: 'error', text: `读取目录失败：${msg}` } })
     }
   },
 
@@ -95,11 +168,16 @@ export const useStore = create<AppState>((set, get) => ({
       set({ active: path })
       return
     }
-    const content = await fsApi.readFile(path)
-    set((s) => ({
-      tabs: [...s.tabs, { path, name, content, savedContent: content, dirty: false }],
-      active: path,
-    }))
+    try {
+      const content = await fsApi.readFile(path)
+      set((s) => ({
+        tabs: [...s.tabs, { path, name, content, savedContent: content, dirty: false }],
+        active: path,
+        notice: null,
+      }))
+    } catch (e) {
+      set({ notice: { kind: 'error', text: `打开「${name}」失败：${errText(e)}` } })
+    }
   },
 
   closeTab(path) {
@@ -130,12 +208,16 @@ export const useStore = create<AppState>((set, get) => ({
   async saveActive() {
     const t = get().tabs.find((x) => x.path === get().active)
     if (!t || !t.dirty) return
-    await fsApi.writeFile(t.path, t.content)
-    set((s) => ({
-      tabs: s.tabs.map((x) =>
-        x.path === t.path ? { ...x, savedContent: x.content, dirty: false } : x
-      ),
-    }))
+    try {
+      await fsApi.writeFile(t.path, t.content)
+      set((s) => ({
+        tabs: s.tabs.map((x) =>
+          x.path === t.path ? { ...x, savedContent: x.content, dirty: false } : x
+        ),
+      }))
+    } catch (e) {
+      set({ notice: { kind: 'error', text: `保存「${t.name}」失败：${errText(e)}` } })
+    }
   },
 
   async newFile() {
@@ -149,9 +231,13 @@ export const useStore = create<AppState>((set, get) => ({
       (get().dirs[root]?.some((d) => d.name === n) ?? false)
     while (exists(name)) name = `untitled-${i++}.md`
     const path = root + sep + name
-    await fsApi.writeFile(path, `# ${name}\n\n`)
-    await get().loadDir(root)
-    await get().openFile(path, name)
+    try {
+      await fsApi.writeFile(path, `# ${name}\n\n`)
+      await get().loadDir(root)
+      await get().openFile(path, name)
+    } catch (e) {
+      set({ notice: { kind: 'error', text: `新建文件失败：${errText(e)}` } })
+    }
   },
 
   setPreviewHtml(html) {
