@@ -53,30 +53,36 @@ npm run dev
 
 ### 桌面端（Tauri，生产形态）
 
-桌面端需要 Rust 工具链。**注意**：默认 `rustup` 会把工具链装到 `C:\Users\你的用户名`，
-与「不写 C 盘」的约定冲突。请改用以下方式把工具链装到非系统盘（例如 E 盘）：
+桌面端需要 Rust 工具链。为了遵守「不写 C 盘」的约定，我们提供了一个**交互式安装脚本**，
+让你在安装时自己选择工具链装在哪块盘：
 
 ```bash
-# 1) 安装 Rust 工具链，但把 CARGO_HOME / RUSTUP_HOME 指到 E 盘
-set CARGO_HOME=E:\rust\cargo
-set RUSTUP_HOME=E:\rust\rustup
-# Linux/macOS 用 export 形式
-winget install Rustlang.Rustup   # 或按官方脚本安装后执行下面两步
-rustup toolchain install stable
-rustup default stable
-
-# 2) 安装 Tauri CLI（已作为 devDependency，无需全局）
-npm install
-
-# 3) 开发预览
-npm run tauri dev
-
-# 4) 打包发布（生成体积仅几 MB 的安装包）
-npm run tauri build
+# 普通用户即可运行；脚本默认推荐一个非 C 盘，也可手动输入任意路径
+powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1
 ```
 
-> Windows 需先安装 [WebView2 Runtime](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/)
-> （Win11 一般已自带）与 Visual Studio 生成工具（C++ 桌面开发 workload）。
+脚本的行为：
+- 列出本机所有固定磁盘，**默认推荐一个非 C 盘**（如 E:），你也可以输入任意绝对路径；
+- 若你输入了 C 盘路径，会**明确警告并二次确认**，确认后才继续；
+- 把 `CARGO_HOME` / `RUSTUP_HOME` 指向你选的目录，并写入**用户级环境变量**（一次设置，后续终端自动生效，无需每次 export）；
+- 下载并安装 `rustup` + `stable` 工具链，再把 `cargo\bin` 加入 PATH；
+- **只要你选了非 C 盘，Rust 工具链、下载的 crate、编译缓存全部留在你选的盘，`C:\Users` 下不会被写入任何工具链数据。**
+
+> 进阶用法：
+> - 跳过交互直接指定位置：`powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1 -InstallDir "D:\myrust"`
+> - 安装 GNU 目标（需自行准备 MinGW-w64）：加 `-Gnu`
+
+装好工具链后，在 Inkwell 目录里：
+
+```bash
+npm install
+npm run tauri dev      # 开发预览
+npm run tauri build    # 打包发布（生成体积仅几 MB 的安装包）
+```
+
+> Windows 上默认的 MSVC 编译目标需要 **Visual Studio 生成工具（C++ 桌面开发 workload）** 提供链接器 `link.exe`。
+> 该工具由微软安装、默认落在 C:，属于外部环境依赖、不在 Inkwell 控制范围内；本脚本只保证
+> **Rust 工具链与 crate 缓存不落 C 盘**。
 > 图标已通过 `scripts/gen_icons.py` 生成全套，无需再跑 `tauri icon`。
 
 ---
@@ -96,6 +102,7 @@ inkwell/
 │  ├─ tauri.conf.json
 │  └─ capabilities/      # 权限声明
 ├─ scripts/gen_icons.py  # 生成全套应用图标
+├─ scripts/install-rust.ps1  # 交互式选择盘符安装 Rust 工具链（不写 C 盘）
 └─ package.json
 ```
 
