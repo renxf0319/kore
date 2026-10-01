@@ -8,6 +8,23 @@ Markdown 解析跑在 Web Worker 里，预览永远跟手。
 
 ---
 
+## 下载安装包
+
+不想自己编译？直接下载对应平台的开箱即用安装包（由 GitHub Actions 在打 tag 时自动构建）：
+
+👉 **[下载最新版本](https://github.com/renxf0319/kore/releases/latest)**
+
+| 平台 | 文件 | 说明 |
+| --- | --- | --- |
+| **Windows** | `Kore_*_x64-setup.exe` / `Kore_*_x64_en-US.msi` | `.exe` 双击安装，或 `.msi` 用于企业部署 |
+| **macOS** | `Kore_*_aarch64.dmg` | Apple Silicon（M 系列）；打开后拖入「应用程序」 |
+| **Linux** | `Kore_*_amd64.AppImage` / `.deb` / `.rpm` | AppImage 免安装直接运行；`.deb`/`.rpm` 供 Debian/RedHat 系包管理 |
+
+> 安装包体积仅 2~3MB（AppImage 因内嵌运行时略大），这正是 Tauri 相对 Electron 的优势所在。
+> 首次打开 macOS 版本若提示「未验证开发者」，右键 → 打开，或到「隐私与安全性」允许即可（未做代码签名）。
+
+---
+
 ## 特性
 
 - **分屏实时预览**：左边写、右边渲染，拖动中缝自由调节比例，60ms 防抖不闪烁。
