@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Inkwell 默认能力：核心权限 + 文件夹选择对话框 + 自定义文件系统命令",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:app:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "inkwell:allow-read-dir",
+    "inkwell:allow-read-file",
+    "inkwell:allow-write-file"
+  ]
+}

@@ -1,0 +1,28 @@
+[package]
+name = "inkwell"
+version = "0.1.0"
+description = "Inkwell 极速本地 Markdown 编辑器"
+authors = ["Inkwell Contributors"]
+edition = "2021"
+
+# 桌面端构建产物不要写入用户的 C 盘仓库；Rust 工具链安装请设置
+# CARGO_HOME / RUSTUP_HOME 指向非系统盘（见 README）。
+[lib]
+name = "inkwell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

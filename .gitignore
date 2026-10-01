@@ -1,0 +1,23 @@
+# deps
+node_modules/
+dist/
+
+# tauri
+src-tauri/target/
+src-tauri/gen/
+
+# rust
+**/*.rs.bk
+
+# os
+.DS_Store
+Thumbs.db
+*.log
+
+# editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# vite 打包配置时的临时文件
+vite.config.ts.timestamp-*.mjs
