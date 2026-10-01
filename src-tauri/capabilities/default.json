@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Inkwell 默认能力：核心权限 + 文件夹选择对话框 + 自定义文件系统命令",
+  "description": "Kore 默认能力：核心权限 + 文件夹选择对话框 + 自定义文件系统命令",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,8 +10,8 @@
     "core:app:default",
     "dialog:default",
     "dialog:allow-open",
-    "inkwell:allow-read-dir",
-    "inkwell:allow-read-file",
-    "inkwell:allow-write-file"
+    "kore:allow-read-dir",
+    "kore:allow-read-file",
+    "kore:allow-write-file"
   ]
 }

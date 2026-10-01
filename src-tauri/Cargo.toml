@@ -1,14 +1,14 @@
 [package]
-name = "inkwell"
+name = "kore"
 version = "0.1.0"
-description = "Inkwell 极速本地 Markdown 编辑器"
-authors = ["Inkwell Contributors"]
+description = "Kore 极速本地 Markdown 编辑器"
+authors = ["Kore Contributors"]
 edition = "2021"
 
 # 桌面端构建产物不要写入用户的 C 盘仓库；Rust 工具链安装请设置
 # CARGO_HOME / RUSTUP_HOME 指向非系统盘（见 README）。
 [lib]
-name = "inkwell_lib"
+name = "kore_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

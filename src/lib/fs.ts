@@ -13,7 +13,7 @@ let rootHandle: FileSystemDirectoryHandle | null = null
 
 function idb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const r = indexedDB.open('inkwell', 1)
+    const r = indexedDB.open('kore', 1)
     r.onupgradeneeded = () => r.result.createObjectStore('kv')
     r.onsuccess = () => resolve(r.result)
     r.onerror = () => reject(r.error)
@@ -165,7 +165,7 @@ export const fsApi = {
 
   // 启动时尝试恢复上次打开的文件夹
   async restore(): Promise<string | null> {
-    if (isTauri) return localStorage.getItem('inkwell-root') || null
+    if (isTauri) return localStorage.getItem('kore-root') || null
     const h = await loadHandle()
     if (h) {
       try {
@@ -179,6 +179,6 @@ export const fsApi = {
   },
 
   async persistRoot(path: string): Promise<void> {
-    if (isTauri) localStorage.setItem('inkwell-root', path)
+    if (isTauri) localStorage.setItem('kore-root', path)
   },
 }

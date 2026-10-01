@@ -1,9 +1,9 @@
 {
-  "name": "inkwell",
+  "name": "kore",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Inkwell · 极速本地 Markdown 编辑器（开源 / 无云同步）",
+  "description": "Kore · 极速本地 Markdown 编辑器（开源 / 无云同步）",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
@@ -22,8 +22,6 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.34.1",
-    "@esbuild/win32-x64": "^0.21.5",
-    "@rollup/rollup-win32-x64-msvc": "^4.63.5",
     "@tauri-apps/api": "^2.0.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "codemirror": "^6.0.1",
@@ -47,5 +45,9 @@
     "@vitejs/plugin-react": "^4.3.2",
     "typescript": "^5.6.2",
     "vite": "^5.4.8"
+  },
+  "optionalDependencies": {
+    "@esbuild/win32-x64": "^0.21.5",
+    "@rollup/rollup-win32-x64-msvc": "^4.63.5"
   }
 }

@@ -1,6 +1,6 @@
 import type { ThemeMode } from './types'
 
-const KEY = 'inkwell-theme'
+const KEY = 'kore-theme'
 
 export function getStoredTheme(): ThemeMode {
   const t = localStorage.getItem(KEY)

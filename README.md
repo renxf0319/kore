@@ -1,8 +1,8 @@
-# Inkwell
+# Kore
 
 > 极速 · 本地 · 开源的 Markdown 编辑器。**不做任何云同步**，文件只留在你的电脑上。
 
-Inkwell 的目标是成为最好用的本地 Markdown 写作工具：启动快、输入零卡顿、界面克制。
+Kore 的目标是成为最好用的本地 Markdown 写作工具：启动快、输入零卡顿、界面克制。
 技术栈刻意选得「新而稳」——Tauri 2（Rust 内核）+ React 18 + TypeScript + Vite，
 Markdown 解析跑在 Web Worker 里，预览永远跟手。
 
@@ -72,7 +72,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1
 > - 跳过交互直接指定位置：`powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1 -InstallDir "D:\myrust"`
 > - 安装 GNU 目标（需自行准备 MinGW-w64）：加 `-Gnu`
 
-装好工具链后，在 Inkwell 目录里：
+装好工具链后，在 Kore 目录里：
 
 ```bash
 npm install
@@ -81,20 +81,30 @@ npm run tauri build    # 打包发布（生成体积仅几 MB 的安装包）
 ```
 
 > Windows 上默认的 MSVC 编译目标需要 **Visual Studio 生成工具（C++ 桌面开发 workload）** 提供链接器 `link.exe`。
-> 该工具由微软安装、默认落在 C:，属于外部环境依赖、不在 Inkwell 控制范围内；本脚本只保证
+> 该工具由微软安装、默认落在 C:，属于外部环境依赖、不在 Kore 控制范围内；本脚本只保证
 > **Rust 工具链与 crate 缓存不落 C 盘**。
 > 图标已通过 `scripts/gen_icons.py` 生成全套，无需再跑 `tauri icon`。
 
 ---
 
+## 下载安装包（Releases）
+
+Kore 是桌面应用，安装包由 **GitHub Actions 自动构建**并附在
+[Releases](https://github.com/renxf0319/kore/releases) 页面：
+
+- **Windows**：`Kore_x.x.x_x64_en-US.msi`（WiX 安装包）
+- **macOS**：`Kore_x.x.x_aarch64.dmg` / `.app`
+- **Linux**：`Kore_x.x.x_amd64.AppImage` / `.deb`
+
+推送 `v*` 标签（如 `v0.1.0`）即触发三平台构建，产物作为 Release 资源发布（默认草稿，确认后发布）。
+本地想自己打包：装好 Rust 工具链后执行 `npm run tauri build`，产物在 `src-tauri/target/release/bundle/`。
+
 ## 推送到 GitHub
 
-> 说明：本仓库在开发环境（WorkBuddy 沙箱）中**无法直连 github.com**（出口代理仅放行内部服务），
-> 因此推送需在你**本机联网环境**执行。仓库已提交完毕、remote 已指向 `renxf0319/inkwell`，
-> 直接运行下面的一键脚本即可，无需手敲 token：
+仓库已推送到 `renxf0319/kore`（公开、MIT）。如需在本机重新推送或用其他账号：
 
 ```bash
-# 在本机（有正常网络的机器）的 inkwell 目录下执行
+# 在本机（有正常网络的机器）的 kore 目录下执行
 powershell -ExecutionPolicy Bypass -File scripts/push-to-github.ps1
 ```
 
@@ -104,8 +114,8 @@ powershell -ExecutionPolicy Bypass -File scripts/push-to-github.ps1
 手动方式（等效）：
 
 ```bash
-git remote set-url origin https://github.com/你的账号/inkwell.git
-gh repo create inkwell --public   # 或网页建空仓库（不要勾 README/.gitignore）
+git remote set-url origin https://github.com/你的账号/kore.git
+gh repo create kore --public   # 或网页建空仓库（不要勾 README/.gitignore）
 git push -u origin master
 ```
 
@@ -114,7 +124,7 @@ git push -u origin master
 ## 项目结构
 
 ```
-inkwell/
+kore/
 ├─ src/                  # React 前端
 │  ├─ components/        # Toolbar / Sidebar / Tabs / Editor / Preview / Outline / StatusBar ...
 │  ├─ lib/               # fs(双模桥) / markdown / outline / export / theme / slug
@@ -145,4 +155,4 @@ inkwell/
 
 ## 许可
 
-[MIT](./LICENSE) © Inkwell Contributors
+[MIT](./LICENSE) © Kore Contributors

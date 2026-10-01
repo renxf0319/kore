@@ -8,12 +8,12 @@
 #
 # Options:
 #   -Account <name>   GitHub username (auto-detected from stored creds if omitted)
-#   -Repo <name>      Repository name (default: inkwell)
+#   -Repo <name>      Repository name (default: kore)
 #   -Branch <name>    Branch to push (default: master)
 
 param(
   [string]$Account = "",
-  [string]$Repo = "inkwell",
+  [string]$Repo = "kore",
   [string]$Branch = "master"
 )
 

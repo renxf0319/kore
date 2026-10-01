@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 Inkwell 应用图标全套（无第三方依赖，纯标准库写 PNG/ICO/ICNS）。
+"""生成 Kore 应用图标全套（无第三方依赖，纯标准库写 PNG/ICO/ICNS）。
 输出到 src-tauri/icons/：32x32.png, 128x128.png, 128x128@2x.png(256),
 icon.png(512), icon.ico, icon.icns。
 """

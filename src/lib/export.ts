@@ -30,7 +30,7 @@ function buildHtmlDoc(html: string, theme: ThemeMode): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Inkwell 导出</title>
+<title>Kore 导出</title>
 <style>
   :root { color-scheme: ${theme}; }
   body { max-width: 820px; margin: 40px auto; padding: 0 24px; background: ${bg}; color: ${fg};

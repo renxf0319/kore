@@ -1,5 +1,5 @@
 # install-rust.ps1
-# Interactive Rust toolchain installer for Inkwell (Tauri desktop build).
+# Interactive Rust toolchain installer for Kore (Tauri desktop build).
 # Lets you choose the install drive so the toolchain never writes to C:\Users.
 #
 # Usage:
@@ -97,11 +97,11 @@ if ($path -notlike "*$cargoBin*") {
 
 Write-Host ""
 Write-Host "Done. Open a NEW terminal and verify with:  rustc --version"
-Write-Host "Then: cd inkwell && npm install && npm run tauri dev"
+Write-Host "Then: cd kore && npm install && npm run tauri dev"
 if (-not $Gnu) {
   Write-Host ""
   Write-Host "NOTE: the default MSVC target needs the Visual Studio Build Tools"
   Write-Host "      (C++ desktop development workload) for the linker. That Microsoft"
-  Write-Host "      tool installs to C: by default and is outside Inkwell's control;"
+  Write-Host "      tool installs to C: by default and is outside Kore's control;"
   Write-Host "      only the Rust toolchain and crate cache above are kept off C:."
 }

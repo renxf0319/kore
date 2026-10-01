@@ -28,7 +28,7 @@ export default function Toolbar() {
     <header className="toolbar no-print">
       <div className="brand">
         <span className="logo" />
-        Inkwell
+        Kore
       </div>
       <div className="spacer" />
       <button onClick={() => void openFolder()}>

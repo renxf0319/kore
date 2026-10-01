@@ -8,7 +8,7 @@ export default function Welcome() {
     <div className="welcome">
       <div className="welcome-card">
         <div className="welcome-logo" />
-        <h1>Inkwell</h1>
+        <h1>Kore</h1>
         <p className="subtitle">极速 · 本地 · 开源的 Markdown 编辑器</p>
         <div className="welcome-actions">
           <button className="primary" onClick={() => void openFolder()}>
