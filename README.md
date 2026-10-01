@@ -79,6 +79,16 @@ REM 或：npm run dev    REM 等价写法，前提是当前 Node ≥ 18
 REM 打开 http://localhost:5173 → 点击「打开文件夹」选择任意本地目录
 ```
 
+> **最省事的两种启动方式**（都不需要先 `cd`）：
+> 1. 在资源管理器里**双击仓库根目录的 `dev.cmd`**；
+> 2. 或在任意终端里执行完整路径：
+>    `E:\WorkBuddy\2026-10-01-13-16-44\kore\dev.cmd`
+>
+> ⚠️ **cmd.exe 的经典坑**：`cd` 不会自动换盘。项目在 E 盘时，
+> `cd E:\...\kore` 不会报错也**不会真的切过去**，后续 `npm run dev` 就会在
+> `C:\Users\你\` 下找 `package.json`，报 `ENOENT ... C:\Users\E\package.json`。
+> 正确写法是加 `/d`：`cd /d E:\WorkBuddy\2026-10-01-13-16-44\kore`。
+
 > 浏览器模式使用 File System Access API，推荐 Chrome / Edge 等支持的浏览器。
 > 选择文件夹后授予读写权限即可像本地应用一样编辑；刷新后通过 IndexedDB 自动恢复。
 
@@ -118,9 +128,12 @@ powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1
 ### 1. 秒级热更（浏览器模式，日常最推荐）
 
 ```cmd
-scripts\dev.cmd        REM 用 .node-version 指定的 Node 启动 Vite，HMR 毫秒级生效
+dev.cmd                REM 仓库根目录，双击或直接执行（推荐，自动处理 Node 版本）
+scripts\dev.cmd        REM 等价写法：读 .node-version 切 Node 后启动 Vite
 npm run dev            REM 等价写法（要求当前 Node ≥ 18）
 ```
+
+> 这三个都会**自动把工作目录切到仓库根**，所以在哪执行都行，不必先 `cd`。
 
 打开 http://localhost:5173 ，点「打开文件夹」选一个本地目录就能写。
 **适用**：UI、编辑器、Markdown 渲染、状态管理等绝大多数改动——保存即刷新，无需重启、无需 Rust。
@@ -229,6 +242,7 @@ kore/
 │  ├─ tauri.conf.json
 │  └─ capabilities/      # 权限声明
 ├─ .node-version         # 固定本项目的 Node 版本（fnm / asdf / volta 均识别）
+├─ dev.cmd               # 根目录一键启动（双击即可，自动切 Node + 切工作目录）
 ├─ scripts/dev.cmd       # 一键启动浏览器模式开发（自动切换 Node 版本）
 ├─ scripts/dev-desktop.cmd   # 一键启动 Tauri 桌面端开发
 ├─ scripts/dev-desktop.ps1   # 同上（PowerShell 版，注入 Rust 工具链环境变量）
