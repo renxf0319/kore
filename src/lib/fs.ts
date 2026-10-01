@@ -208,6 +208,23 @@ export const fsApi = {
     return !isTauri && rootHandle !== null
   },
 
+  // 丢弃已保存的目录句柄（恢复流程出问题时的手动逃生口）
+  async forgetRoot(): Promise<void> {
+    rootHandle = null
+    if (isTauri) {
+      localStorage.removeItem('kore-root')
+      return
+    }
+    try {
+      const db = await idb()
+      const tx = db.transaction('kv', 'readwrite')
+      tx.objectStore('kv').delete('root')
+      await txDone(tx)
+    } catch {
+      /* 存储不可用时忽略：下一次打开自然也不会恢复 */
+    }
+  },
+
   async persistRoot(path: string): Promise<void> {
     if (isTauri) localStorage.setItem('kore-root', path)
   },

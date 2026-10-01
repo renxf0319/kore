@@ -20,6 +20,27 @@ function isAbort(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
 }
 
+// 恢复上次文件夹是启动路径上唯一可能长时间挂起的操作（IndexedDB 反序列化句柄、
+// 浏览器权限数据库异常等）。加超时兜底：宁可这一次不恢复，也不能让页面卡死。
+function withTimeout<T>(
+  p: Promise<T>,
+  ms: number
+): Promise<{ value: T | null; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ value: null, timedOut: true }), ms)
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve({ value: v, timedOut: false })
+      },
+      () => {
+        clearTimeout(timer)
+        resolve({ value: null, timedOut: false })
+      }
+    )
+  })
+}
+
 interface AppState {
   theme: ThemeMode
   mode: 'tauri' | 'browser' | 'unknown'
@@ -68,8 +89,28 @@ export const useStore = create<AppState>((set, get) => ({
     applyTheme(theme)
     const mode = isTauri ? 'tauri' : 'browser'
     set({ theme, mode })
+
+    // 逃生口：地址栏加 ?reset 打开，直接丢弃上次保存的目录句柄。
+    // 当恢复流程本身把页面拖死、连界面都点不动时，这是唯一还能用的自救方式。
+    if (new URLSearchParams(location.search).has('reset')) {
+      await fsApi.forgetRoot()
+      set({
+        ready: true,
+        notice: { kind: 'info', text: '已清除上次打开的文件夹记录，请重新选择目录' },
+      })
+      return
+    }
+
     try {
-      const restored = await fsApi.restore()
+      const { value: restored, timedOut } = await withTimeout(fsApi.restore(), 3000)
+      if (timedOut) {
+        set({
+          notice: {
+            kind: 'error',
+            text: '恢复上次打开的文件夹超时，已跳过。可点击工具栏「打开文件夹」重新选择目录。',
+          },
+        })
+      }
       if (restored) {
         set({ rootPath: restored.name, rootName: rootNameOf(restored.name) })
         if (restored.granted) {
