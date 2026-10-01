@@ -87,6 +87,30 @@ npm run tauri build    # 打包发布（生成体积仅几 MB 的安装包）
 
 ---
 
+## 推送到 GitHub
+
+> 说明：本仓库在开发环境（WorkBuddy 沙箱）中**无法直连 github.com**（出口代理仅放行内部服务），
+> 因此推送需在你**本机联网环境**执行。仓库已提交完毕、remote 已指向 `renxf0319/inkwell`，
+> 直接运行下面的一键脚本即可，无需手敲 token：
+
+```bash
+# 在本机（有正常网络的机器）的 inkwell 目录下执行
+powershell -ExecutionPolicy Bypass -File scripts/push-to-github.ps1
+```
+
+脚本会：自动识别本机 `~/.git-credentials` 中的 GitHub 账号 → 设置凭证助手 → 若仓库不存在则建仓（公开 + MIT）→ 推送当前 `master` 分支。
+若你的账号不是 `renxf0319`，加参数指定：`...push-to-github.ps1 -Account 你的账号`。
+
+手动方式（等效）：
+
+```bash
+git remote set-url origin https://github.com/你的账号/inkwell.git
+gh repo create inkwell --public   # 或网页建空仓库（不要勾 README/.gitignore）
+git push -u origin master
+```
+
+---
+
 ## 项目结构
 
 ```
@@ -103,6 +127,7 @@ inkwell/
 │  └─ capabilities/      # 权限声明
 ├─ scripts/gen_icons.py  # 生成全套应用图标
 ├─ scripts/install-rust.ps1  # 交互式选择盘符安装 Rust 工具链（不写 C 盘）
+├─ scripts/push-to-github.ps1  # 一键建仓并推送到 GitHub（在本机联网环境运行）
 └─ package.json
 ```
 
