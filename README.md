@@ -89,14 +89,6 @@ powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1
 > - 跳过交互直接指定位置：`powershell -ExecutionPolicy Bypass -File scripts/install-rust.ps1 -InstallDir "D:\myrust"`
 > - 安装 GNU 目标（需自行准备 MinGW-w64）：加 `-Gnu`
 
-装好工具链后，在 Kore 目录里：
-
-```bash
-npm install
-npm run tauri dev      # 开发预览
-npm run tauri build    # 打包发布（生成体积仅几 MB 的安装包）
-```
-
 > Windows 上默认的 MSVC 编译目标需要 **Visual Studio 生成工具（C++ 桌面开发 workload）** 提供链接器 `link.exe`。
 > 该工具由微软安装、默认落在 C:，属于外部环境依赖、不在 Kore 控制范围内；本脚本只保证
 > **Rust 工具链与 crate 缓存不落 C 盘**。
@@ -104,17 +96,62 @@ npm run tauri build    # 打包发布（生成体积仅几 MB 的安装包）
 
 ---
 
-## 下载安装包（Releases）
+## 本地开发与调试
 
-Kore 是桌面应用，安装包由 **GitHub Actions 自动构建**并附在
-[Releases](https://github.com/renxf0319/kore/releases) 页面：
+**日常改代码不需要出安装包。** 安装包只在「发版」时才构建（见下下节，由 CI 自动完成）。
+平时用下面三条通道迭代，改完保存即生效：
 
-- **Windows**：`Kore_x.x.x_x64_en-US.msi`（WiX 安装包）
-- **macOS**：`Kore_x.x.x_aarch64.dmg` / `.app`
-- **Linux**：`Kore_x.x.x_amd64.AppImage` / `.deb`
+### 1. 秒级热更（浏览器模式，日常最推荐）
 
-推送 `v*` 标签（如 `v0.1.0`）即触发三平台构建，产物作为 Release 资源发布（默认草稿，确认后发布）。
-本地想自己打包：装好 Rust 工具链后执行 `npm run tauri build`，产物在 `src-tauri/target/release/bundle/`。
+```bash
+npm run dev          # 启动 Vite，HMR 毫秒级生效
+```
+
+打开 http://localhost:5173 ，点「打开文件夹」选一个本地目录就能写。
+**适用**：UI、编辑器、Markdown 渲染、状态管理等绝大多数改动——保存即刷新，无需重启、无需 Rust。
+
+### 2. 桌面端热更（真窗口，验证 Tauri 相关功能）
+
+```bash
+npm run dev:desktop        # = tauri dev：拉起 Vite + 打开原生窗口，保存即热更
+```
+
+或用附带的启动脚本（会自动识别你用 `install-rust.ps1` 选的工具链盘符并注入
+`CARGO_HOME` / `RUSTUP_HOME`，即使当前终端还没读到用户级环境变量也能直接跑）：
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/dev-desktop.ps1
+```
+
+**适用**：验证 Rust 侧命令（读写磁盘）、原生对话框、窗口行为，以及打包前的真实表现。
+
+### 3. 生产构建自测（提交前 / 上线前）
+
+```bash
+npm run typecheck      # TypeScript 类型检查（秒级，不启动服务）
+npm run build          # tsc + vite 生产构建
+npm run preview        # 本地预览 dist 产物
+```
+
+**适用**：提交前自查，或验证「构建产物」是否正常（例如依赖分包、Worker 是否被独立拆出）。
+
+### 调试小抄
+
+- 桌面端窗口内 **右键 → 检查**（或 `F12`）可开 DevTools；`tauri dev` 默认开启调试。
+- Vite HMR 对 React 组件、CSS 变量、Markdown 样式都即时生效，改样式几乎零等待。
+- 想快速看某个 Markdown 文档的渲染效果：`npm run dev` 后在浏览器里打开它即可。
+- 只想确认「类型 / 构建有没有坏」：跑 `npm run typecheck`，不启动任何服务。
+
+---
+
+## 发布安装包（Releases）
+
+Kore 的安装包由 **GitHub Actions 自动构建**：推送 `v*` 标签（如 `v0.1.0`）即触发
+Windows / macOS / Linux 三平台 `tauri build`，产物附到
+[Releases](https://github.com/renxf0319/kore/releases)（默认草稿，确认后点 Publish 即公开）。
+
+本地想自己出包（一般不需要，仅调试用）：装好 Rust 工具链后执行 `npm run build:desktop`，
+产物在 `src-tauri/target/release/bundle/`。
 
 ## 推送到 GitHub
 
@@ -154,6 +191,7 @@ kore/
 │  └─ capabilities/      # 权限声明
 ├─ scripts/gen_icons.py  # 生成全套应用图标
 ├─ scripts/install-rust.ps1  # 交互式选择盘符安装 Rust 工具链（不写 C 盘）
+├─ scripts/dev-desktop.ps1  # 一键启动桌面端开发（自动注入工具链环境变量，热更）
 ├─ scripts/push-to-github.ps1  # 一键建仓并推送到 GitHub（在本机联网环境运行）
 └─ package.json
 ```
