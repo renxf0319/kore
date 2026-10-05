@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { OpenTab, ThemeMode } from '../lib/types'
+import type { OpenTab, SidePane, ThemeMode } from '../lib/types'
 import { fsApi, isTauri } from '../lib/fs'
 import { applyTheme, getStoredTheme } from '../lib/theme'
 
@@ -64,6 +64,8 @@ function withTimeout<T>(
   })
 }
 
+let untitledSeq = 0
+
 interface AppState {
   theme: ThemeMode
   mode: 'tauri' | 'browser' | 'unknown'
@@ -72,26 +74,38 @@ interface AppState {
   expanded: Record<string, boolean>
   dirs: Record<string, { name: string; path: string; isDir: boolean }[]>
   tabs: OpenTab[]
+  /** 当前激活标签的 id（不是 path —— 未命名文档没有 path） */
   active: string | null
-  previewHtml: string
   ready: boolean
   notice: Notice | null
+  /** 左侧栏当前页签：文件 / 大纲 */
+  pane: SidePane
+  /** 左侧栏是否展开；折叠后主区占满 */
+  sidebarOpen: boolean
+  /** 大纲跳转请求：目标行号，由 Editor 消费后清空 */
+  jumpLine: number | null
 
   init: () => Promise<void>
   setNotice: (n: Notice | null) => void
   regrantRoot: () => Promise<void>
   setTheme: (t: ThemeMode) => void
-  toggleTheme: () => void
+  setPane: (p: SidePane) => void
+  toggleSidebar: () => void
+  setSidebar: (open: boolean) => void
+  setJumpLine: (n: number | null) => void
+
+  newDoc: () => void
+  openFileDialog: () => Promise<void>
   openFolder: () => Promise<void>
   loadDir: (path: string) => Promise<void>
   toggleExpand: (path: string) => void
   openFile: (path: string, name: string) => Promise<void>
-  closeTab: (path: string) => void
-  setActive: (path: string) => void
-  updateContent: (path: string, content: string) => void
-  saveActive: () => Promise<void>
-  newFile: () => Promise<void>
-  setPreviewHtml: (html: string) => void
+  closeTab: (id: string) => void
+  setActive: (id: string) => void
+  updateContent: (id: string, content: string) => void
+  save: () => Promise<void>
+  saveAs: () => Promise<void>
+  activeTab: () => OpenTab | null
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -103,9 +117,11 @@ export const useStore = create<AppState>((set, get) => ({
   dirs: {},
   tabs: [],
   active: null,
-  previewHtml: '',
   ready: false,
   notice: null,
+  pane: 'files',
+  sidebarOpen: true,
+  jumpLine: null,
 
   async init() {
     const theme = getStoredTheme()
@@ -181,10 +197,67 @@ export const useStore = create<AppState>((set, get) => ({
     set({ theme: t })
   },
 
-  toggleTheme() {
-    const t = get().theme === 'dark' ? 'light' : 'dark'
-    applyTheme(t)
-    set({ theme: t })
+  setPane(p) {
+    // 点当前页签 = 折叠/展开左侧栏，和 Typora 一致
+    if (get().pane === p && get().sidebarOpen) {
+      set({ sidebarOpen: false })
+      return
+    }
+    set({ pane: p, sidebarOpen: true })
+  },
+
+  toggleSidebar() {
+    set((s) => ({ sidebarOpen: !s.sidebarOpen }))
+  },
+
+  setSidebar(open) {
+    set({ sidebarOpen: open })
+  },
+
+  setJumpLine(n) {
+    set({ jumpLine: n })
+  },
+
+  // 新建空白文档：不碰磁盘，直接进编辑态，保存时再问存哪
+  newDoc() {
+    untitledSeq += 1
+    const id = `untitled-${Date.now()}-${untitledSeq}`
+    set((s) => ({
+      tabs: [
+        ...s.tabs,
+        { id, path: null, name: '未命名', content: '', savedContent: '', dirty: false },
+      ],
+      active: id,
+      pane: 'files',
+      notice: null,
+    }))
+  },
+
+  async openFileDialog() {
+    try {
+      const f = await fsApi.openFile()
+      if (!f) return
+      // 同一文件重复打开时复用已有标签，而不是叠一份
+      const exist = get().tabs.find((t) => t.path === f.path)
+      if (exist) {
+        set({ active: exist.id, notice: null })
+        return
+      }
+      const id = `file-${f.path}`
+      set((s) => ({
+        tabs: [
+          ...s.tabs,
+          { id, path: f.path, name: f.name, content: f.content, savedContent: f.content, dirty: false },
+        ],
+        active: id,
+        notice: null,
+      }))
+      // 桌面端把工作区切到该文件所在目录，侧栏文件树跟着走
+      if (isTauri) await fsApi.adoptParentOf(f.path)
+    } catch (e) {
+      if (isAbort(e)) return
+      set({ notice: { kind: 'error', text: `打开文件失败：${errText(e)}` } })
+    }
   },
 
   async openFolder() {
@@ -229,14 +302,18 @@ export const useStore = create<AppState>((set, get) => ({
   async openFile(path, name) {
     const existing = get().tabs.find((t) => t.path === path)
     if (existing) {
-      set({ active: path })
+      set({ active: existing.id })
       return
     }
     try {
       const content = await fsApi.readFile(path)
+      const id = `file-${path}`
       set((s) => ({
-        tabs: [...s.tabs, { path, name, content, savedContent: content, dirty: false }],
-        active: path,
+        tabs: [
+          ...s.tabs,
+          { id, path, name, content, savedContent: content, dirty: false },
+        ],
+        active: id,
         notice: null,
       }))
     } catch (e) {
@@ -244,39 +321,50 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  closeTab(path) {
+  closeTab(id) {
     set((s) => {
-      const idx = s.tabs.findIndex((t) => t.path === path)
-      const tabs = s.tabs.filter((t) => t.path !== path)
+      const idx = s.tabs.findIndex((t) => t.id === id)
+      const tabs = s.tabs.filter((t) => t.id !== id)
       let active = s.active
-      if (s.active === path) {
+      if (s.active === id) {
         const next = tabs[idx] || tabs[idx - 1] || null
-        active = next ? next.path : null
+        active = next ? next.id : null
       }
       return { tabs, active }
     })
   },
 
-  setActive(path) {
-    set({ active: path })
+  setActive(id) {
+    set({ active: id })
   },
 
-  updateContent(path, content) {
+  updateContent(id, content) {
     set((s) => ({
       tabs: s.tabs.map((t) =>
-        t.path === path ? { ...t, content, dirty: content !== t.savedContent } : t
+        t.id === id ? { ...t, content, dirty: content !== t.savedContent } : t
       ),
     }))
   },
 
-  async saveActive() {
-    const t = get().tabs.find((x) => x.path === get().active)
-    if (!t || !t.dirty) return
+  activeTab() {
+    const s = get()
+    return s.tabs.find((t) => t.id === s.active) ?? null
+  },
+
+  // 保存：有路径直接写盘；无路径（未命名文档）自动转入另存为
+  async save() {
+    const t = get().activeTab()
+    if (!t) return
+    if (!t.path) {
+      await get().saveAs()
+      return
+    }
+    if (!t.dirty) return
     try {
       await fsApi.writeFile(t.path, t.content)
       set((s) => ({
         tabs: s.tabs.map((x) =>
-          x.path === t.path ? { ...x, savedContent: x.content, dirty: false } : x
+          x.id === t.id ? { ...x, savedContent: x.content, dirty: false } : x
         ),
       }))
     } catch (e) {
@@ -284,28 +372,28 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  async newFile() {
-    const root = get().rootPath
-    if (!root) return
-    const sep = isTauri ? '\\' : '/'
-    let name = 'untitled.md'
-    let i = 1
-    const exists = (n: string) =>
-      get().tabs.some((t) => t.name === n) ||
-      (get().dirs[root]?.some((d) => d.name === n) ?? false)
-    while (exists(name)) name = `untitled-${i++}.md`
-    const path = root + sep + name
+  async saveAs() {
+    const t = get().activeTab()
+    if (!t) return
     try {
-      await fsApi.writeFile(path, `# ${name}\n\n`)
-      await get().loadDir(root)
-      await get().openFile(path, name)
+      // 桌面端给绝对路径做建议名，浏览器端用文件名（此时没有真实路径）
+      const suggested = t.path ?? t.name
+      const p = await fsApi.saveAs(suggested)
+      if (!p) return // 用户取消
+      const name = rootNameOf(p)
+      const id = `file-${p}`
+      set((s) => ({
+        tabs: s.tabs.map((x) =>
+          x.id === t.id
+            ? { ...x, id, path: p, name, savedContent: x.content, dirty: false }
+            : x
+        ),
+        active: id,
+      }))
     } catch (e) {
-      set({ notice: { kind: 'error', text: `新建文件失败：${errText(e)}` } })
+      if (isAbort(e)) return
+      set({ notice: { kind: 'error', text: `另存为失败：${errText(e)}` } })
     }
-  },
-
-  setPreviewHtml(html) {
-    set({ previewHtml: html })
   },
 }))
 

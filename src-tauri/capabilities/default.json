@@ -1,14 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Kore 默认能力：核心权限 + 文件夹选择对话框。应用自身的命令（read_dir/read_file/write_file）默认允许，无需在此声明。",
+  "description": "Kore 默认能力：核心权限 + 文件对话框（打开/保存）+ 新建窗口。应用自身的命令（read_dir/read_file/write_file）默认允许，无需在此声明。",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:event:default",
     "core:window:default",
     "core:app:default",
+    "core:webview:allow-create-webview-window",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

@@ -1,25 +1,55 @@
 import { fsApi, isTauri } from './fs'
+import { renderMarkdown } from './markdown'
+import DOMPurify from 'dompurify'
 import type { ThemeMode } from './types'
 
-// 导出独立 HTML 文档（内嵌样式，脱离应用也能正常阅读/分享）
-export async function exportHtml(
-  sourcePath: string,
-  html: string,
-  theme: ThemeMode
-): Promise<void> {
-  const doc = buildHtmlDoc(html, theme)
-  if (isTauri) {
-    const out = sourcePath.replace(/\.md$/i, '') + '.html'
-    await fsApi.writeFile(out, doc)
-  } else {
-    const name = outName(sourcePath)
-    download(name, doc, 'text/html;charset=utf-8')
-  }
+// WYSIWYG 模式下没有常驻的预览面板，导出统一走「现渲染」：
+// 把当前 Markdown 源码丢给 Worker 渲染 → 消毒 → 拼自包含文档。
+async function renderSafe(src: string): Promise<string> {
+  const raw = await renderMarkdown(src)
+  return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
 }
 
-// 导出 PDF：复用打印样式（@media print 仅显示预览面板），由系统打印对话框“另存为 PDF”
-export function exportPdf(): void {
+// 导出独立 HTML：桌面端写到源文件同级目录，浏览器端走下载
+export async function exportHtml(
+  sourceName: string,
+  source: string,
+  theme: ThemeMode
+): Promise<string> {
+  const html = await renderSafe(source)
+  const doc = buildHtmlDoc(html, theme)
+  if (isTauri && sourceName.includes('\\')) {
+    const out = sourceName.replace(/\.md$/i, '') + '.html'
+    await fsApi.writeFile(out, doc)
+    return out
+  }
+  const name = outName(sourceName)
+  download(name, doc, 'text/html;charset=utf-8')
+  return name
+}
+
+// 导出 PDF：先把渲染结果塞进隐藏的 print-root，再调系统打印对话框「另存为 PDF」
+export async function exportPdf(
+  source: string,
+  theme: ThemeMode
+): Promise<void> {
+  const html = await renderSafe(source)
+  injectPrintDoc(html, theme)
+  // 等一帧，确保浏览器已经完成布局再进打印
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   window.print()
+}
+
+// 打印专用容器：屏幕上 display:none，@media print 下才显示并隐藏应用其余部分
+function injectPrintDoc(html: string, theme: ThemeMode): void {
+  let el = document.getElementById('kore-print-root')
+  if (!el) {
+    el = document.createElement('div')
+    el.id = 'kore-print-root'
+    document.body.appendChild(el)
+  }
+  el.setAttribute('data-theme', theme)
+  el.innerHTML = html
 }
 
 function buildHtmlDoc(html: string, theme: ThemeMode): string {
@@ -53,8 +83,8 @@ ${html}
 }
 
 function outName(p: string): string {
-  const base = p.split('/').pop() || 'document.md'
-  return base.replace(/\.md$/i, '') + '.html'
+  const base = p.split(/[\\/]/).pop() || 'document.md'
+  return base.replace(/\.(md|markdown|txt)$/i, '') + '.html'
 }
 
 function download(name: string, content: string, mime: string): void {

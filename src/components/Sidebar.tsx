@@ -1,74 +1,80 @@
+import { useMemo } from 'react'
 import { useStore } from '../state/store'
-import {
-  ChevronRight,
-  ChevronDown,
-  FileText,
-  Folder,
-  FolderOpen,
-} from 'lucide-react'
-import type { FileNode } from '../lib/types'
+import { extractOutline } from '../lib/outline'
+import { FileTree } from './FileTree'
+import { ChevronLeft, PanelLeft } from 'lucide-react'
 
+// 左侧栏：顶部「文件 / 大纲」两个页签，内容区按页签切换。
+// 折叠由页签行右端的小箭头控制（Typora 的位置约定）。
 export default function Sidebar() {
-  const rootPath = useStore((s) => s.rootPath)
-  const rootName = useStore((s) => s.rootName)
-  const dirs = useStore((s) => s.dirs)
-  const expanded = useStore((s) => s.expanded)
-  const toggleExpand = useStore((s) => s.toggleExpand)
-  const openFile = useStore((s) => s.openFile)
-  const active = useStore((s) => s.active)
-
-  const Node = ({ node }: { node: FileNode }) => {
-    const isOpen = expanded[node.path]
-    if (node.isDir) {
-      return (
-        <div className="tree-node">
-          <div className="tree-row" onClick={() => toggleExpand(node.path)}>
-            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            {isOpen ? <FolderOpen size={14} /> : <Folder size={14} />}
-            <span>{node.name}</span>
-          </div>
-          {isOpen && (
-            <div className="tree-children">
-              {(dirs[node.path] || []).map((c) => (
-                <Node key={c.path} node={c} />
-              ))}
-            </div>
-          )}
-        </div>
-      )
-    }
-    return (
-      <div
-        className={`tree-row file ${node.path === active ? 'active' : ''}`}
-        onClick={() => void openFile(node.path, node.name)}
-      >
-        <FileText size={14} />
-        <span>{node.name}</span>
-      </div>
-    )
-  }
+  const pane = useStore((s) => s.pane)
+  const setPane = useStore((s) => s.setPane)
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
 
   return (
     <aside className="sidebar no-print">
-      <div className="sidebar-head">
-        <span>资源管理器</span>
+      <div className="sidebar-tabs">
+        <button
+          className={`sidebar-tab${pane === 'files' ? ' active' : ''}`}
+          onClick={() => setPane('files')}
+        >
+          文件
+        </button>
+        <button
+          className={`sidebar-tab${pane === 'outline' ? ' active' : ''}`}
+          onClick={() => setPane('outline')}
+        >
+          大纲
+        </button>
+        <button
+          className="sidebar-collapse"
+          onClick={toggleSidebar}
+          title="收起左侧区域"
+          aria-label="收起左侧区域"
+        >
+          <ChevronLeft size={15} />
+        </button>
       </div>
-      {rootPath && (
-        <div className="tree">
-          <div className="tree-row" onClick={() => toggleExpand(rootPath)}>
-            {expanded[rootPath] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <Folder size={14} />
-            <span className="root-name">{rootName}</span>
-          </div>
-          {expanded[rootPath] && (
-            <div className="tree-children">
-              {(dirs[rootPath] || []).map((c) => (
-                <Node key={c.path} node={c} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+
+      <div className="sidebar-body">
+        {pane === 'files' ? <FileTree /> : <OutlineList />}
+      </div>
     </aside>
+  )
+}
+
+function OutlineList() {
+  const tabs = useStore((s) => s.tabs)
+  const active = useStore((s) => s.active)
+  const setJumpLine = useStore((s) => s.setJumpLine)
+  const tab = tabs.find((t) => t.id === active)
+  const items = useMemo(() => extractOutline(tab?.content ?? ''), [tab?.content])
+
+  if (!tab) return <div className="sidebar-empty">打开文档后显示大纲</div>
+  if (items.length === 0) return <div className="sidebar-empty">本文档没有标题</div>
+
+  return (
+    <ul className="outline">
+      {items.map((it, i) => (
+        <li key={`${it.line}-${i}`} className={`lv-${it.level}`}>
+          <button onClick={() => setJumpLine(it.line)}>{it.text}</button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// 左侧栏收起后贴在主区左边缘的展开把手
+export function SidebarHandle() {
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
+  return (
+    <button
+      className="sidebar-handle no-print"
+      onClick={toggleSidebar}
+      title="展开左侧区域"
+      aria-label="展开左侧区域"
+    >
+      <PanelLeft size={15} />
+    </button>
   )
 }

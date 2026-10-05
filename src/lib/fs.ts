@@ -10,6 +10,9 @@ export const isTauri =
 
 // ----------------------- 浏览器模式（File System Access API） -----------------------
 let rootHandle: FileSystemDirectoryHandle | null = null
+// 「打开单个文件 / 另存为」得到的文件句柄。key 是虚拟路径（此时就是文件名本身）。
+// 没有它就无法在没有工作区的情况下保存 —— 浏览器不允许凭路径字符串重新拿到句柄。
+const looseFiles = new Map<string, FileSystemFileHandle>()
 // 目录选择器同时只能开一个：重复调用会让第二个 Promise 永远挂着，
 // Chrome 会把这种页面判定为「没有响应」。
 let picking = false
@@ -99,6 +102,12 @@ async function browserList(path: string): Promise<FileNode[]> {
 }
 
 async function browserRead(path: string): Promise<string> {
+  // 无工作区时（直接「打开」单个文件），走 looseFiles 句柄
+  const loose = looseFiles.get(path)
+  if (loose) {
+    const f = await loose.getFile()
+    return f.text()
+  }
   await ensurePerm()
   const root = rootHandle!
   const parts = relParts(root, path)
@@ -110,7 +119,15 @@ async function browserRead(path: string): Promise<string> {
   return file.text()
 }
 
+async function writeLoose(h: FileSystemFileHandle, content: string): Promise<void> {
+  const w = await h.createWritable()
+  await w.write(content)
+  await w.close()
+}
+
 async function browserWrite(path: string, content: string): Promise<void> {
+  const loose = looseFiles.get(path)
+  if (loose) return writeLoose(loose, content)
   await ensurePerm()
   const root = rootHandle!
   const parts = relParts(root, path)
@@ -118,9 +135,7 @@ async function browserWrite(path: string, content: string): Promise<void> {
   if (!fileName) throw new Error('无效的文件路径')
   const dir = await dirAt(root, parts)
   const fh = await dir.getFileHandle(fileName, { create: true })
-  const w = await fh.createWritable()
-  await w.write(content)
-  await w.close()
+  await writeLoose(fh, content)
 }
 
 async function browserPick(): Promise<string | null> {
@@ -147,6 +162,50 @@ async function browserPick(): Promise<string | null> {
   }
 }
 
+// 打开单个文件：返回 { path, name, content }，path 即文件名（虚拟路径）
+async function browserOpenFile(): Promise<OpenedFile | null> {
+  const picker = (
+    window as Window & {
+      showOpenFilePicker?: (o?: unknown) => Promise<FileSystemFileHandle[]>
+    }
+  ).showOpenFilePicker
+  if (!picker) {
+    throw new Error('当前浏览器不支持打开文件（请用 Chrome / Edge 或桌面端）')
+  }
+  const [h] = await picker({
+    multiple: false,
+    types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }],
+  })
+  if (!h) return null
+  const name = h.name
+  looseFiles.set(name, h)
+  const content = await (await h.getFile()).text()
+  return { path: name, name, content }
+}
+
+// 另存为：用户选好落点后把句柄存起来，后续保存走同一个句柄
+async function browserSaveAs(suggestedName: string): Promise<string | null> {
+  const picker = (
+    window as Window & {
+      showSaveFilePicker?: (o?: unknown) => Promise<FileSystemFileHandle>
+    }
+  ).showSaveFilePicker
+  if (!picker) {
+    throw new Error('当前浏览器不支持另存为（请用 Chrome / Edge 或桌面端）')
+  }
+  const h = await picker({
+    suggestedName: ensureMdExt(suggestedName),
+    types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }],
+  })
+  const name = h.name
+  looseFiles.set(name, h)
+  return name
+}
+
+function ensureMdExt(name: string): string {
+  return /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`
+}
+
 // ----------------------- Tauri 模式（Rust 原生命令） -----------------------
 async function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
@@ -157,6 +216,44 @@ async function tauriPick(): Promise<string | null> {
   const { open } = await import('@tauri-apps/plugin-dialog')
   const r = await open({ directory: true, multiple: false })
   return typeof r === 'string' ? r : null
+}
+
+async function tauriOpenFile(): Promise<OpenedFile | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const r = await open({
+    multiple: false,
+    filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
+  })
+  if (typeof r !== 'string') return null
+  const content = await tauriInvoke<string>('read_file', { path: r })
+  return { path: r, name: baseName(r), content }
+}
+
+async function tauriSaveAs(suggestedPath: string): Promise<string | null> {
+  const { save } = await import('@tauri-apps/plugin-dialog')
+  const r = await save({
+    defaultPath: ensureMdExt(suggestedPath),
+    filters: [{ name: 'Markdown', extensions: ['md'] }],
+  })
+  return r ?? null
+}
+
+function baseName(p: string): string {
+  const parts = p.split(/[\\/]/)
+  return parts[parts.length - 1] || p
+}
+
+function dirName(p: string): string {
+  const parts = p.split(/[\\/]/)
+  parts.pop()
+  return parts.join(isTauri ? '\\' : '/')
+}
+
+// 一个已读入的文件
+export interface OpenedFile {
+  path: string
+  name: string
+  content: string
 }
 
 // ----------------------- 统一 API -----------------------
@@ -174,14 +271,34 @@ export const fsApi = {
 
   async readFile(path: string): Promise<string> {
     if (isTauri) return tauriInvoke<string>('read_file', { path })
-    if (!rootHandle) throw new Error('未选择文件夹')
+    if (!rootHandle && !looseFiles.has(path)) throw new Error('未选择文件夹或文件')
     return browserRead(path)
   },
 
   async writeFile(path: string, content: string): Promise<void> {
     if (isTauri) return tauriInvoke<void>('write_file', { path, contents: content })
-    if (!rootHandle) throw new Error('未选择文件夹')
+    if (!rootHandle && !looseFiles.has(path)) throw new Error('未选择文件夹或文件')
     return browserWrite(path, content)
+  },
+
+  // 打开单个文件（不要求先有工作区）
+  async openFile(): Promise<OpenedFile | null> {
+    if (isTauri) return tauriOpenFile()
+    return browserOpenFile()
+  },
+
+  // 另存为：返回最终落盘路径（已确保 .md 扩展名），用户取消返回 null
+  async saveAs(suggestedName: string): Promise<string | null> {
+    if (isTauri) return tauriSaveAs(suggestedName)
+    return browserSaveAs(suggestedName)
+  },
+
+  // 供「打开」单个文件后，把所在目录登记为当前工作区（仅桌面端有意义）
+  async adoptParentOf(path: string): Promise<void> {
+    if (isTauri) {
+      const d = dirName(path)
+      if (d) localStorage.setItem('kore-root', d)
+    }
   },
 
   // 启动时尝试恢复上次打开的文件夹。
