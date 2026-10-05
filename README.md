@@ -36,7 +36,9 @@ Kore 的目标是成为最好用的本地 Markdown 写作工具：启动快、�
   与 `主题`（白色 / 黑色）。`Esc` 或点击菜单外收起。
 - **左侧栏可切换、可折叠**：`文件`（目录树）/ `大纲`（点击标题跳转）两个页签，
   点页签行右端的小箭头折叠左栏，编辑区占满整个窗口。
-- **底部标签栏**：多文档并行，左右箭头滚动，`+` 新建，未保存的标签带圆点标记。
+- **底部栏**：左下角是左侧栏显隐按钮；中间显示当前文档名，未保存时带圆点，右侧 `×` 关闭。
+- **单文档模式**：不做多标签。点其他文件直接覆盖当前文档；**若上一个文档有未保存修改，
+  会弹「保存 / 放弃 / 取消」**，选「保存」会先落盘再切换（另存为取消则中止切换，不会丢内容）。
 - **双运行模式**：
   - 桌面端（Tauri）：Rust 直接读写磁盘，体积小、启动快、权限安全。
   - 浏览器端：用 File System Access API 直接读写本地文件，无需安装即可体验。
@@ -241,8 +243,8 @@ git push -u origin master
 kore/
 ├─ src/                  # React 前端
 │  ├─ assets/            # logo-mark / logo-wordmark（明暗两套，由 gen_logo.py 生成）
-│  ├─ components/        # Toolbar / Sidebar / Tabs / Editor / Preview / Outline / StatusBar ...
-│  ├─ lib/               # fs(双模桥) / markdown / outline / export / theme / slug / logo
+│  ├─ components/        # MenuBar / Sidebar / FileTree / DocBar / Editor / ConfirmSwitch / Banner / StatusBar / Welcome
+│  ├─ lib/               # wysiwyg(所见即所得装饰引擎) / fs(双模桥) / markdown / outline / export / theme / slug / logo
 │  ├─ workers/           # markdown.worker.ts（Worker 中解析 Markdown）
 │  ├─ state/             # Zustand store
 │  └─ styles/            # tokens.css(主题变量) / global.css
@@ -270,8 +272,10 @@ kore/
 ## 路线图
 
 - [x] Typora 风格所见即所得编辑区
-- [x] 一级菜单（文件 / 主题）+ 左侧「文件 / 大纲」可切换可折叠 + 底部标签栏
+- [x] 一级菜单（文件 / 主题）+ 左侧「文件 / 大纲」可切换 + 底部栏左下角控制侧栏显隐
 - [x] 无工作区直接编辑，保存时再选路径
+- [x] 单文档模式 + 未保存拦截（保存 / 放弃 / 取消）
+- [ ] 恢复多标签（或独立的窗口/分屏）
 - [ ] WYSIWYG 支持表格 / 脚注（当前仍显示源码）
 - [ ] 图片粘贴自动保存到本地
 - [ ] 关闭标签前确认未保存内容

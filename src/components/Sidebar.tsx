@@ -2,14 +2,12 @@ import { useMemo } from 'react'
 import { useStore } from '../state/store'
 import { extractOutline } from '../lib/outline'
 import { FileTree } from './FileTree'
-import { ChevronLeft, PanelLeft } from 'lucide-react'
 
 // 左侧栏：顶部「文件 / 大纲」两个页签，内容区按页签切换。
-// 折叠由页签行右端的小箭头控制（Typora 的位置约定）。
+// 显隐控制**不在这里** —— 按用户要求放在底部栏左下角（DocBar）。
 export default function Sidebar() {
   const pane = useStore((s) => s.pane)
   const setPane = useStore((s) => s.setPane)
-  const toggleSidebar = useStore((s) => s.toggleSidebar)
 
   return (
     <aside className="sidebar no-print">
@@ -25,14 +23,6 @@ export default function Sidebar() {
           onClick={() => setPane('outline')}
         >
           大纲
-        </button>
-        <button
-          className="sidebar-collapse"
-          onClick={toggleSidebar}
-          title="收起左侧区域"
-          aria-label="收起左侧区域"
-        >
-          <ChevronLeft size={15} />
         </button>
       </div>
 
@@ -61,20 +51,5 @@ function OutlineList() {
         </li>
       ))}
     </ul>
-  )
-}
-
-// 左侧栏收起后贴在主区左边缘的展开把手
-export function SidebarHandle() {
-  const toggleSidebar = useStore((s) => s.toggleSidebar)
-  return (
-    <button
-      className="sidebar-handle no-print"
-      onClick={toggleSidebar}
-      title="展开左侧区域"
-      aria-label="展开左侧区域"
-    >
-      <PanelLeft size={15} />
-    </button>
   )
 }

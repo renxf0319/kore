@@ -100,12 +100,32 @@ interface AppState {
   loadDir: (path: string) => Promise<void>
   toggleExpand: (path: string) => void
   openFile: (path: string, name: string) => Promise<void>
-  closeTab: (id: string) => void
-  setActive: (id: string) => void
+  closeDoc: () => void
   updateContent: (id: string, content: string) => void
   save: () => Promise<void>
   saveAs: () => Promise<void>
   activeTab: () => OpenTab | null
+
+  // --- 单文档切换的未保存拦截 ---
+  /** 待确认的切换动作；非 null 时对话框显示「保存 / 放弃 / 取消」 */
+  pendingSwitch: (() => void) | null
+  /** 切换前的统一入口：当前文档有未保存改动时挂起动作，否则直接执行 */
+  guard: (action: () => void) => void
+  /** 关闭当前文档（走拦截） */
+  requestClose: () => void
+  /** 放弃未保存改动，直接执行待切换动作 */
+  resolveDiscard: () => void
+  /** 取消切换 */
+  cancelSwitch: () => void
+}
+
+/**
+ * 单文档模式：`tabs` 永远只有 0 或 1 个元素。
+ * 保留数组结构是为了让 Editor / StatusBar / FileTree 的取值逻辑不必大改，
+ * 但**不要**再往里 push 第二个文档。
+ */
+function single(doc: OpenTab | null): Pick<AppState, 'tabs' | 'active'> {
+  return { tabs: doc ? [doc] : [], active: doc ? doc.id : null }
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -122,6 +142,7 @@ export const useStore = create<AppState>((set, get) => ({
   pane: 'files',
   sidebarOpen: true,
   jumpLine: null,
+  pendingSwitch: null,
 
   async init() {
     const theme = getStoredTheme()
@@ -198,11 +219,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setPane(p) {
-    // 点当前页签 = 折叠/展开左侧栏，和 Typora 一致
-    if (get().pane === p && get().sidebarOpen) {
-      set({ sidebarOpen: false })
-      return
-    }
+    // 侧栏显隐只有一个入口：底部栏左下角的按钮（用户指定）。
+    // 这里只负责切页签，不再做「再点一次=折叠」的隐式折叠。
     set({ pane: p, sidebarOpen: true })
   },
 
@@ -218,46 +236,58 @@ export const useStore = create<AppState>((set, get) => ({
     set({ jumpLine: n })
   },
 
+  // --- 未保存拦截 -----------------------------------------------------------
+  // 所有会「丢弃当前文档」的动作（新建/打开/关闭）都先过这里。
+  // 有未保存改动时把动作挂起，交给对话框的「保存 / 放弃 / 取消」决定。
+  guard(action: () => void) {
+    const cur = get().activeTab()
+    if (cur?.dirty) {
+      set({ pendingSwitch: action })
+      return
+    }
+    action()
+  },
+
+  requestClose() {
+    get().guard(() => set(single(null)))
+  },
+
+  resolveDiscard() {
+    const act = get().pendingSwitch
+    set({ pendingSwitch: null })
+    act?.()
+  },
+
+  cancelSwitch() {
+    set({ pendingSwitch: null })
+  },
+
   // 新建空白文档：不碰磁盘，直接进编辑态，保存时再问存哪
   newDoc() {
-    untitledSeq += 1
-    const id = `untitled-${Date.now()}-${untitledSeq}`
-    set((s) => ({
-      tabs: [
-        ...s.tabs,
-        { id, path: null, name: '未命名', content: '', savedContent: '', dirty: false },
-      ],
-      active: id,
-      pane: 'files',
-      notice: null,
-    }))
+    get().guard(() => {
+      untitledSeq += 1
+      const id = `untitled-${Date.now()}-${untitledSeq}`
+      set(single({ id, path: null, name: '未命名', content: '', savedContent: '', dirty: false }))
+    })
   },
 
   async openFileDialog() {
+    // 先弹系统对话框选文件，拿到结果后再走拦截 —— 顺序反了会让用户
+    // 先选完文件才发现要处理上一个文档的未保存内容。
+    let f
     try {
-      const f = await fsApi.openFile()
-      if (!f) return
-      // 同一文件重复打开时复用已有标签，而不是叠一份
-      const exist = get().tabs.find((t) => t.path === f.path)
-      if (exist) {
-        set({ active: exist.id, notice: null })
-        return
-      }
-      const id = `file-${f.path}`
-      set((s) => ({
-        tabs: [
-          ...s.tabs,
-          { id, path: f.path, name: f.name, content: f.content, savedContent: f.content, dirty: false },
-        ],
-        active: id,
-        notice: null,
-      }))
-      // 桌面端把工作区切到该文件所在目录，侧栏文件树跟着走
-      if (isTauri) await fsApi.adoptParentOf(f.path)
+      f = await fsApi.openFile()
     } catch (e) {
       if (isAbort(e)) return
       set({ notice: { kind: 'error', text: `打开文件失败：${errText(e)}` } })
+      return
     }
+    if (!f) return
+    get().guard(async () => {
+      set(single({ id: `file-${f.path}`, path: f.path, name: f.name, content: f.content, savedContent: f.content, dirty: false }))
+      // 桌面端把工作区切到该文件所在目录，侧栏文件树跟着走
+      if (isTauri) await fsApi.adoptParentOf(f.path)
+    })
   },
 
   async openFolder() {
@@ -300,42 +330,22 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async openFile(path, name) {
-    const existing = get().tabs.find((t) => t.path === path)
-    if (existing) {
-      set({ active: existing.id })
-      return
-    }
+    // 点当前正打开的同一文件：什么都不用做，更不该弹未保存提示
+    if (get().activeTab()?.path === path) return
+    let content: string
     try {
-      const content = await fsApi.readFile(path)
-      const id = `file-${path}`
-      set((s) => ({
-        tabs: [
-          ...s.tabs,
-          { id, path, name, content, savedContent: content, dirty: false },
-        ],
-        active: id,
-        notice: null,
-      }))
+      content = await fsApi.readFile(path)
     } catch (e) {
       set({ notice: { kind: 'error', text: `打开「${name}」失败：${errText(e)}` } })
+      return
     }
-  },
-
-  closeTab(id) {
-    set((s) => {
-      const idx = s.tabs.findIndex((t) => t.id === id)
-      const tabs = s.tabs.filter((t) => t.id !== id)
-      let active = s.active
-      if (s.active === id) {
-        const next = tabs[idx] || tabs[idx - 1] || null
-        active = next ? next.id : null
-      }
-      return { tabs, active }
+    get().guard(() => {
+      set(single({ id: `file-${path}`, path, name, content, savedContent: content, dirty: false }))
     })
   },
 
-  setActive(id) {
-    set({ active: id })
+  closeDoc() {
+    get().requestClose()
   },
 
   updateContent(id, content) {

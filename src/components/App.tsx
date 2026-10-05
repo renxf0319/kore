@@ -2,10 +2,11 @@ import { useEffect } from 'react'
 import { useStore } from '../state/store'
 import MenuBar from './MenuBar'
 import Banner from './Banner'
-import Sidebar, { SidebarHandle } from './Sidebar'
-import Tabs from './Tabs'
-import Editor from './Editor'
+import Sidebar from './Sidebar'
+import DocBar from './DocBar'
 import StatusBar from './StatusBar'
+import ConfirmSwitch from './ConfirmSwitch'
+import Editor from './Editor'
 import Welcome from './Welcome'
 
 export default function App() {
@@ -37,13 +38,13 @@ export default function App() {
       <Banner />
       <div className="body">
         {sidebarOpen && <Sidebar />}
-        {!sidebarOpen && <SidebarHandle />}
         <div className="main">
           {ready && active ? <Editor /> : <Welcome />}
         </div>
       </div>
-      <Tabs />
+      <DocBar />
       <StatusBar />
+      <ConfirmSwitch />
     </div>
   )
 }

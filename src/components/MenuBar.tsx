@@ -17,7 +17,6 @@ interface Item {
 export default function MenuBar() {
   const [open, setOpen] = useState<MenuKey>(null)
   const barRef = useRef<HTMLDivElement>(null)
-  const rootName = useStore((s) => s.rootName)
 
   useEffect(() => {
     if (!open) return
@@ -62,9 +61,6 @@ export default function MenuBar() {
         >
           <ThemeItems onPick={run} />
         </Menu>
-        <div className="menubar-title">
-          {rootName ? `Kore — ${rootName}` : 'Kore'}
-        </div>
       </div>
     </div>
   )
