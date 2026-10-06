@@ -61,10 +61,13 @@ button {
 .menu-root {
   position: relative;
 }
+/* 菜单栏与侧栏页签协调：同为 13px，靠字重/颜色分层，字号不跳变 */
 .menu-trigger {
-  padding: 4px 10px;
+  padding: 4px 11px;
   border-radius: 4px;
   font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
   color: var(--fg);
 }
 .menu-trigger:hover,
@@ -133,24 +136,33 @@ button {
 }
 .sidebar-tabs {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 6px 0;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 6px;
   border-bottom: 1px solid var(--border);
 }
+/* 页签加宽：Typora 的「文件 / 大纲」占位明显更宽松（约 3em 宽），
+   之前的 padding 6px 12px 显得局促。min-width 保证两个页签等宽对齐。 */
 .sidebar-tab {
-  padding: 6px 12px;
+  flex: 0 0 auto;
+  min-width: 4.6em;
+  padding: 9px 0;
+  text-align: center;
   font-size: 13px;
+  /* 与菜单栏同字号但稍轻：菜单栏是 13px/400，页签 13px/500，
+     层级靠字重而非字号区分，避免两处字号跳变显得不协调 */
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--fg-muted);
   border-bottom: 2px solid transparent;
-  border-radius: 4px 4px 0 0;
 }
 .sidebar-tab:hover {
   color: var(--fg);
+  background: var(--bg-sunken);
 }
 .sidebar-tab.active {
   color: var(--fg);
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--fg);
   font-weight: 600;
 }
 .sidebar-body {
@@ -159,24 +171,21 @@ button {
   overflow: auto;
   padding: 6px 4px 12px;
 }
+/* 无工作区：只放一个「打开文件夹」按钮，居中偏上，不要大段说明文字 */
 .sidebar-empty {
-  padding: 24px 12px;
-  text-align: center;
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 1.9;
-}
-.sidebar-empty .dim {
-  font-size: 12px;
-  opacity: 0.75;
-  margin-top: 10px;
+  padding: 20px 12px;
+  display: flex;
+  justify-content: center;
 }
 .ghost-btn {
-  margin-top: 10px;
-  padding: 5px 12px;
+  padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: 5px;
   font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
 }
 .ghost-btn:hover {
   border-color: var(--accent);

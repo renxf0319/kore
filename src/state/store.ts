@@ -139,6 +139,22 @@ function single(doc: OpenTab | null): Pick<AppState, 'tabs' | 'active'> {
   return { tabs: doc ? [doc] : [], active: doc ? doc.id : null }
 }
 
+/**
+ * 造一个空的未命名文档（Typora 启动时的样子）。
+ * `id` 用时间戳 + 递增序号，保证同一毫秒内连续新建也不会撞 key。
+ */
+function makeBlank(): OpenTab {
+  untitledSeq += 1
+  return {
+    id: `untitled-${Date.now()}-${untitledSeq}`,
+    path: null,
+    name: '未命名',
+    content: '',
+    savedContent: '',
+    dirty: false,
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
   theme: 'light',
   mode: 'unknown',
@@ -165,6 +181,7 @@ export const useStore = create<AppState>((set, get) => ({
     // 当恢复流程本身把页面拖死、连界面都点不动时，这是唯一还能用的自救方式。
     if (new URLSearchParams(location.search).has('reset')) {
       await fsApi.forgetRoot()
+      set(single(makeBlank()))
       set({
         ready: true,
         notice: { kind: 'info', text: '已清除上次打开的文件夹记录，请重新选择目录' },
@@ -201,6 +218,10 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ notice: { kind: 'error', text: `恢复上次的文件夹失败：${errText(e)}` } })
     }
+    // 启动即备好一个空的未命名文档（Typora 的行为）：
+    // 右侧编辑区一进来就是可输入的光标，而不是欢迎页 ——
+    // 「打开文件」应该是主动选择的结果，而不是进入编辑器的前提。
+    set(single(makeBlank()))
     set({ ready: true })
   },
 
@@ -260,7 +281,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   requestClose() {
-    get().guard(() => set(single(null)))
+    // 关掉最后一个文档后补一个空白文档，编辑区不退回欢迎页 ——
+    // 与 Typora 一致：任何时刻都有一个可输入的编辑区。
+    get().guard(() => set(single(makeBlank())))
   },
 
   resolveDiscard() {
@@ -275,11 +298,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // 新建空白文档：不碰磁盘，直接进编辑态，保存时再问存哪
   newDoc() {
-    get().guard(() => {
-      untitledSeq += 1
-      const id = `untitled-${Date.now()}-${untitledSeq}`
-      set(single({ id, path: null, name: '未命名', content: '', savedContent: '', dirty: false }))
-    })
+    get().guard(() => set(single(makeBlank())))
   },
 
   async openFileDialog() {

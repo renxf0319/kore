@@ -21,13 +21,13 @@ export function FileTree() {
   const tabs = useStore((s) => s.tabs)
 
   if (!rootPath) {
+    // 按需求：空态只留一个「打开文件夹」按钮，不做任何文字说明。
+    // Typora 左侧栏无工作区时也是极简的，文字提示反而像在教用户。
     return (
       <div className="sidebar-empty">
-        <p>尚未打开工作区</p>
         <button className="ghost-btn" onClick={() => void openFolder()}>
-          打开文件夹
+          <FolderOpen size={14} /> 打开文件夹
         </button>
-        <p className="dim">也可以直接「文件 → 打开」单个文件，或「新建文档」后另存为</p>
       </div>
     )
   }
