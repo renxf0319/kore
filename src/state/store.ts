@@ -93,6 +93,8 @@ interface AppState {
   pane: SidePane
   /** 左侧栏是否展开；折叠后主区占满 */
   sidebarOpen: boolean
+  /** 左侧栏宽度（px），可由侧栏右缘的竖线拖动调整 */
+  sidebarW: number
   /** 大纲跳转请求：目标行号，由 Editor 消费后清空 */
   jumpLine: number | null
 
@@ -103,6 +105,7 @@ interface AppState {
   setPane: (p: SidePane) => void
   toggleSidebar: () => void
   setSidebar: (open: boolean) => void
+  setSidebarW: (w: number) => void
   setJumpLine: (n: number | null) => void
 
   newDoc: () => void
@@ -131,6 +134,31 @@ interface AppState {
 }
 
 /**
+ * 左侧栏宽度：拖动竖线可调，持久化到 localStorage。
+ * 范围限制在 [140, 520]：小于 140px 文件名几乎不可读，大于 520px
+ * 编辑区会被压得比侧栏还窄，失去主次。
+ */
+const SIDEBAR_W_MIN = 140
+const SIDEBAR_W_MAX = 520
+const SIDEBAR_W_DEFAULT = 196
+const SIDEBAR_W_KEY = 'kore-sidebar-w'
+
+function clampSidebarW(w: number): number {
+  return Math.round(Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, w)))
+}
+
+function readSidebarW(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_W_KEY)
+    const n = raw ? Number(raw) : NaN
+    return Number.isFinite(n) ? clampSidebarW(n) : SIDEBAR_W_DEFAULT
+  } catch {
+    // 隐私模式下 localStorage 可能抛异常，用默认值即可
+    return SIDEBAR_W_DEFAULT
+  }
+}
+
+/**
  * 单文档模式：`tabs` 永远只有 0 或 1 个元素。
  * 保留数组结构是为了让 Editor / StatusBar / FileTree 的取值逻辑不必大改，
  * 但**不要**再往里 push 第二个文档。
@@ -143,8 +171,7 @@ function single(doc: OpenTab | null): Pick<AppState, 'tabs' | 'active'> {
  * 造一个空的未命名文档（Typora 启动时的样子）。
  * `id` 用时间戳 + 递增序号，保证同一毫秒内连续新建也不会撞 key。
  */
-function makeBlank(): OpenTab {
-  untitledSeq += 1
+function makeBlank(): OpenTab {  untitledSeq += 1
   return {
     id: `untitled-${Date.now()}-${untitledSeq}`,
     path: null,
@@ -168,6 +195,7 @@ export const useStore = create<AppState>((set, get) => ({
   notice: null,
   pane: 'files',
   sidebarOpen: true,
+  sidebarW: readSidebarW(),
   jumpLine: null,
   pendingSwitch: null,
 
@@ -262,6 +290,16 @@ export const useStore = create<AppState>((set, get) => ({
 
   setSidebar(open) {
     set({ sidebarOpen: open })
+  },
+
+  setSidebarW(w) {
+    const sidebarW = clampSidebarW(w)
+    set({ sidebarW })
+    try {
+      localStorage.setItem(SIDEBAR_W_KEY, String(sidebarW))
+    } catch {
+      // 存不上不影响本次会话使用，只是下次启动不留存
+    }
   },
 
   setJumpLine(n) {

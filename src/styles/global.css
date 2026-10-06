@@ -127,9 +127,9 @@ button {
 
 /* ---------------- 左侧栏 ---------------- */
 .sidebar {
-  /* Typora 侧栏约占窗口 16%（1080 宽时约 175px）。原来 240px 太宽，
-     会把正文起始位置推得离侧栏很远，视觉上「空」得厉害。 */
-  width: 196px;
+  /* 宽度由 store.sidebarW 控制（侧栏右缘竖线可拖动调整，持久化到 localStorage）。
+     这里只给默认值，实际生效的是 App 里注入的内联 style。 */
+  width: var(--sidebar-w, 196px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -139,24 +139,22 @@ button {
 .sidebar-tabs {
   display: flex;
   align-items: stretch;
-  gap: 0;
+  justify-content: center;
+  gap: 4px;
   padding: 0;
   border-bottom: 1px solid var(--border);
 }
-/* 两个页签平分标签栏宽度并占满整行。
-   flex:1 + min-width:0 才能真正平分（只写 min-width 会各占内容宽，不满行）。 */
+/* 页签**按内容宽度**居中排布，不再平分整行 —— Typora 是这种紧凑排法。
+   各自 padding 14px 让文字仍居中在自己那一格里。 */
 .sidebar-tab {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 9px 0;
+  flex: 0 0 auto;
+  padding: 9px 14px;
   text-align: center;
   font-size: 13px;
-  /* 与菜单栏同字号但稍轻：菜单栏是 13px/400，页签 13px/500，
-     层级靠字重而非字号区分，避免两处字号跳变显得不协调 */
   font-weight: 500;
   letter-spacing: 0.02em;
   color: var(--fg-muted);
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
 }
 .sidebar-tab:hover {
   color: var(--fg);
@@ -166,6 +164,30 @@ button {
   color: var(--fg);
   border-bottom-color: var(--fg);
   font-weight: 600;
+}
+
+/* 侧栏右缘的拖拽把手：一条 3px 的热区，hover 时显示细竖线提示 */
+.sidebar-resizer {
+  flex-shrink: 0;
+  width: 3px;
+  margin-left: -3px;
+  cursor: col-resize;
+  background: transparent;
+  border-right: 1px solid var(--border);
+  transition: background 0.12s;
+  position: relative;
+  z-index: 2;
+}
+.sidebar-resizer:hover {
+  background: var(--accent);
+}
+/* 拖动中：整页禁用选中文本，光标统一为 col-resize（挂在 body 上，鼠标移出把手也不丢） */
+body.resizing-col {
+  user-select: none;
+  cursor: col-resize;
+}
+body.resizing-col * {
+  cursor: col-resize !important;
 }
 .sidebar-body {
   flex: 1;
@@ -182,15 +204,15 @@ button {
   flex: 1;
 }
 /* 无工作区 / 大纲为空：内容在剩余空间里上下居中。
-   之前只有 justify-content（水平居中）且靠 padding-top 往下压，
-   在 500px 高的窗口里会偏上，不像 Typora 那样真正居中。 */
+   注意：不要加 padding-bottom 去「压低」——那会让视觉中心偏上。
+   要真正居中就去掉纵向 padding，让 flex 居中生效。 */
 .sidebar-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 0 12px 24px;
+  padding: 0 12px;
   color: var(--fg-muted);
   font-size: 13px;
   text-align: center;

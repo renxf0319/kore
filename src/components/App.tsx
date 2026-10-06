@@ -3,6 +3,7 @@ import { useStore } from '../state/store'
 import MenuBar from './MenuBar'
 import Banner from './Banner'
 import Sidebar from './Sidebar'
+import SidebarResizer from './SidebarResizer'
 import DocBar from './DocBar'
 import StatusBar from './StatusBar'
 import ConfirmSwitch from './ConfirmSwitch'
@@ -14,6 +15,7 @@ export default function App() {
   const active = useStore((s) => s.active)
   const ready = useStore((s) => s.ready)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const sidebarW = useStore((s) => s.sidebarW)
 
   useEffect(() => {
     void init()
@@ -37,7 +39,10 @@ export default function App() {
       <MenuBar />
       <Banner />
       <div className="body">
-        {sidebarOpen && <Sidebar />}
+        {sidebarOpen && (
+          <Sidebar style={{ width: sidebarW }} />
+        )}
+        {sidebarOpen && <SidebarResizer />}
         <div className="main">
           {ready && active ? <Editor /> : <Welcome />}
         </div>
