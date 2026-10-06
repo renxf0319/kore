@@ -166,6 +166,7 @@ function useFileItems(): Item[] {
   const openFolder = useStore((s) => s.openFolder)
   const save = useStore((s) => s.save)
   const saveAs = useStore((s) => s.saveAs)
+  const closeDoc = useStore((s) => s.closeDoc)
   const activeTab = useStore((s) => s.activeTab)
   const setNotice = useStore((s) => s.setNotice)
   const theme = useStore((s) => s.theme)
@@ -208,6 +209,9 @@ function useFileItems(): Item[] {
         { label: '导出为 HTML…', onSelect: doExport('html') },
       ],
     },
+    { sep: true },
+    // 单文档模式下底部栏不再放关闭按钮，关闭入口挪到这里
+    { label: '关闭文档', onSelect: () => closeDoc() },
   ]
 }
 

@@ -243,9 +243,23 @@ button {
 .tree-row.file {
   padding-left: 22px;
 }
+/* 当前打开的文件：单文档模式下左侧高亮是唯一的「我在编辑哪个文件」指示，
+   所以要比普通 hover 更醒目 —— 左侧竖条 + 强调色 + 加粗。 */
 .tree-row.active {
+  position: relative;
   background: var(--accent-soft);
   color: var(--accent);
+  font-weight: 600;
+}
+.tree-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
 }
 .tree-children {
   padding-left: 12px;

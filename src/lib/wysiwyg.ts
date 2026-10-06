@@ -72,6 +72,26 @@ function hide(ctx: Ctx, lineNo: number, from: number, to: number): void {
   ctx.claimed.push([from, to])
 }
 
+/**
+ * 算出「哪一行应当露出原始标记」，返回 -1 表示整篇都不露。
+ *
+ * 判定条件（三个都要满足，缺一不可）：
+ *   1. 编辑器有焦点 —— 焦点在文件树/菜单时，用户看不到光标，不该给他看语法
+ *   2. 光标不在文档开头（head > 0）
+ *   3. 选区非空（拖选状态）
+ *
+ * 条件 2 是修一个具体 bug：打开文档时 `view.focus()` 会把光标放到位置 0，
+ * 于是「光标行」= 第 1 行 = 标题行，`#` 就露出来了。用户必须点一下正文才正常。
+ * 根因是「刚打开」和「用户把光标放进去」在 position 0 上无法区分，
+ * 所以用 head > 0 作为「用户确实动过」的代理信号。
+ */
+function activeLine(view: EditorView): number {
+  if (!view.hasFocus) return -1
+  const head = view.state.selection.main.head
+  if (head === 0 && view.state.selection.main.empty) return -1
+  return view.state.doc.lineAt(head).number
+}
+
 // --- 块级语法 -----------------------------------------------------------
 const HEADING_RE = /^(#{1,6})(\s+|$)(.*)$/
 const UL_RE = /^(\s*)([-*+])(\s+)(.*)$/
@@ -338,9 +358,8 @@ class ImageWidget extends WidgetType {
 function build(view: EditorView): DecorationSet {
   const state = view.state
   const out: Pending[] = []
-  const head = state.selection.main.head
   const ctx: Ctx = {
-    cursorLine: state.doc.lineAt(head).number,
+    cursorLine: activeLine(view),
     out,
     claimed: [],
     inFence: false,
@@ -383,8 +402,9 @@ const livePreviewPlugin = ViewPlugin.fromClass(
     }
 
     update(u: ViewUpdate): void {
-      // 光标移动也要重算：哪一行「亮出原始标记」是跟着光标走的
-      if (u.docChanged || u.selectionSet || u.viewportChanged) {
+      // 重算条件里**必须包含 focusChanged**：activeLine() 依赖 view.hasFocus，
+      // 点进文件树再点回编辑器，光标没动但「哪一行露标记」已经变了。
+      if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged) {
         this.decorations = build(u.view)
       }
     }
