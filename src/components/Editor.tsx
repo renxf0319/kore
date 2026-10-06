@@ -77,7 +77,12 @@ export default function Editor() {
 
     const view = new EditorView({ state, parent: host.current })
     viewRef.current = view
-    if (id) setTimeout(() => view.focus(), 0)
+    // 只在「空文档」时自动聚焦；打开已有文件不聚焦。
+    // - 打开已有 md：用户要求编辑区**不显示光标**（原来 focus() 让光标停在
+    //   第一个字符并闪烁）。不聚焦 → CodeMirror 未激活，selection 不渲染。
+    //   用户点击编辑区后自动聚焦并显示光标，与 Typora 一致。
+    // - 空文档（启动时的未命名页）：Typora 是直接可输入的，所以要聚焦。
+    if (!doc) setTimeout(() => view.focus(), 0)
     return () => {
       view.destroy()
       viewRef.current = null

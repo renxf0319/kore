@@ -40,8 +40,8 @@ function OutlineList() {
   const tab = tabs.find((t) => t.id === active)
   const items = useMemo(() => extractOutline(tab?.content ?? ''), [tab?.content])
 
-  if (!tab) return <div className="sidebar-empty">打开文档后显示大纲</div>
-  if (items.length === 0) return <div className="sidebar-empty">本文档没有标题</div>
+  if (!tab) return <div className="sidebar-empty">无标题</div>
+  if (items.length === 0) return <div className="sidebar-empty">无标题</div>
 
   return (
     <ul className="outline">

@@ -127,7 +127,9 @@ button {
 
 /* ---------------- 左侧栏 ---------------- */
 .sidebar {
-  width: 240px;
+  /* Typora 侧栏约占窗口 16%（1080 宽时约 175px）。原来 240px 太宽，
+     会把正文起始位置推得离侧栏很远，视觉上「空」得厉害。 */
+  width: 196px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -138,14 +140,14 @@ button {
   display: flex;
   align-items: stretch;
   gap: 0;
-  padding: 0 6px;
+  padding: 0;
   border-bottom: 1px solid var(--border);
 }
-/* 页签加宽：Typora 的「文件 / 大纲」占位明显更宽松（约 3em 宽），
-   之前的 padding 6px 12px 显得局促。min-width 保证两个页签等宽对齐。 */
+/* 两个页签平分标签栏宽度并占满整行。
+   flex:1 + min-width:0 才能真正平分（只写 min-width 会各占内容宽，不满行）。 */
 .sidebar-tab {
-  flex: 0 0 auto;
-  min-width: 4.6em;
+  flex: 1 1 0;
+  min-width: 0;
   padding: 9px 0;
   text-align: center;
   font-size: 13px;
@@ -169,13 +171,29 @@ button {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 6px 4px 12px;
-}
-/* 无工作区：只放一个「打开文件夹」按钮，居中偏上，不要大段说明文字 */
-.sidebar-empty {
-  padding: 20px 12px;
+  /* 改成 flex 纵向容器：里面的 .sidebar-empty 才能用 flex:1 占满剩余高度，
+     从而真正上下居中。原来的 block 布局下 flex:1 完全无效。 */
   display: flex;
+  flex-direction: column;
+}
+/* 有内容时（目录树 / 大纲列表）不该被 flex 拉伸破坏 */
+.sidebar-body > .tree,
+.sidebar-body > .outline {
+  flex: 1;
+}
+/* 无工作区 / 大纲为空：内容在剩余空间里上下居中。
+   之前只有 justify-content（水平居中）且靠 padding-top 往下压，
+   在 500px 高的窗口里会偏上，不像 Typora 那样真正居中。 */
+.sidebar-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  padding: 0 12px 24px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  text-align: center;
 }
 .ghost-btn {
   padding: 6px 14px;
@@ -304,10 +322,11 @@ button {
   padding: 40px 0 45vh;
 }
 .editor-host .cm-content {
-  /* Typora 的窄栏居中排版 */
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 0 40px;
+  /* 排版模型对齐 Typora：**左侧固定留白，不做 max-width 居中**。
+     之前用 max-width:800px + margin:auto，居中后起点会随窗口宽度漂移
+     （1080 宽时起点距编辑区左沿仅 42px，看起来贴边太左）。
+     Typora 是左边留一块固定空白、正文顺势排到右边，起点稳定且观感一致。 */
+  padding: 0 48px 0 96px;
   caret-color: var(--accent);
 }
 .editor-host .cm-gutters {
