@@ -206,6 +206,14 @@ function ensureMdExt(name: string): string {
   return /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`
 }
 
+/** Rust `FileEntry` 的原始形状：字段名是 snake_case */
+interface RustFileEntry {
+  name: string
+  path: string
+  is_dir?: boolean
+  isDir?: boolean
+}
+
 // ----------------------- Tauri 模式（Rust 原生命令） -----------------------
 async function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
@@ -264,7 +272,18 @@ export const fsApi = {
   },
 
   async listDir(path: string): Promise<FileNode[]> {
-    if (isTauri) return tauriInvoke<FileNode[]>('read_dir', { path })
+    if (isTauri) {
+      const raw = await tauriInvoke<RustFileEntry[]>('read_dir', { path })
+      // 归一化：Rust 侧字段名一旦改动（is_dir ↔ isDir），这里兜住。
+      // 不加这层的话，字段名不匹配会让 isDir 变成 undefined，
+      // 所有子目录被当成文件，点击就去 read_file 一个目录 → Windows os error 5，
+      // 表现为「文件夹点不开」且**没有任何前端报错指向真正原因**，极难定位。
+      return raw.map((r) => ({
+        name: r.name,
+        path: r.path,
+        isDir: Boolean(r.isDir ?? r.is_dir),
+      }))
+    }
     if (!rootHandle) throw new Error('未选择文件夹')
     return browserList(path)
   },

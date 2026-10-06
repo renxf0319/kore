@@ -43,6 +43,17 @@ function isAbort(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
 }
 
+/**
+ * 判断「读取失败」是不是因为目标其实是目录。
+ * Windows 上对目录调 read_to_string 会得到 os error 5（ERROR_ACCESS_DENIED），
+ * 但同一条错误信息也可能来自真正的权限问题，所以这里只做保守判断：
+ * 仅当错误文本里出现目录相关的中文提示或明确的 access denied 且路径无扩展名时才算。
+ */
+function isDirectoryError(e: unknown): boolean {
+  const t = e instanceof Error ? e.message : String(e)
+  return /不是文件|是文件夹|is a directory|EISDIR/i.test(t)
+}
+
 // 恢复上次文件夹是启动路径上唯一可能长时间挂起的操作（IndexedDB 反序列化句柄、
 // 浏览器权限数据库异常等）。加超时兜底：宁可这一次不恢复，也不能让页面卡死。
 function withTimeout<T>(
@@ -336,6 +347,13 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       content = await fsApi.readFile(path)
     } catch (e) {
+      // 兜底：把「这是个目录」翻译成人话。
+      // 不加这层时，用户看到的是 `os error 5 拒绝访问`，
+      // 既看不出是哪个文件、也不知道该点「展开」而不是「打开」。
+      if (isDirectoryError(e)) {
+        set({ notice: { kind: 'info', text: `「${name}」是文件夹，请点击左侧箭头展开` } })
+        return
+      }
       set({ notice: { kind: 'error', text: `打开「${name}」失败：${errText(e)}` } })
       return
     }
