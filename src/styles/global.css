@@ -112,6 +112,30 @@ button {
   color: var(--accent);
   font-size: 12px;
 }
+/* 菜单右侧的快捷键提示，如 Ctrl+Shift+N。
+   margin-left:auto 把它推到行尾；hover 时转灰蓝，和菜单项文字形成层次。 */
+.menu-accel {
+  margin-left: auto;
+  padding-left: 24px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.menu-item:hover .menu-accel {
+  color: var(--accent);
+}
+/* 菜单名后的记忆键，如「文件(F)」，默认弱化，hover 时与文字同色 */
+.menu-accel-key {
+  margin-left: 1px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.menu-trigger:hover .menu-accel-key,
+.menu-trigger.open .menu-accel-key {
+  color: inherit;
+}
 .menu-arrow {
   margin-left: auto;
   color: var(--fg-muted);
@@ -139,31 +163,71 @@ button {
 .sidebar-tabs {
   display: flex;
   align-items: stretch;
+  /* 两个页签合计占侧栏宽度的 80%（各 40%），整体左右居中 —— 左右各留 10% 空白。
+     gap 必须为 0，否则多出的缝隙会把合计宽度撑破 80%。 */
   justify-content: center;
-  gap: 4px;
+  gap: 0;
   padding: 0;
   border-bottom: 1px solid var(--border);
 }
-/* 页签**按内容宽度**居中排布，不再平分整行 —— Typora 是这种紧凑排法。
-   各自 padding 14px 让文字仍居中在自己那一格里。 */
+/* 页签**各占 40%**、文字**在自己那一格内居中**。
+   flex-basis 是百分比，故侧栏拖宽后两格始终各占 40%、合计 80%。 */
 .sidebar-tab {
-  flex: 0 0 auto;
-  padding: 9px 14px;
+  flex: 0 0 40%;
+  min-width: 0;
+  /* 只留顶部内边距，左右和底部都给 0：
+     - 左右给 0，label 的百分比宽度才是「格子宽度的 70%」而不是内容区的 70%；
+     - 底部给 0 + align-items:flex-end，让下划线贴住容器底边。 */
+  padding: 9px 0 0;
+  /* 纵向 flex +底部对齐：把文字标签推到格子底边，
+     这样 label 的 border-bottom 就与 .sidebar-tabs 的 border-bottom 重合。 */
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
   text-align: center;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.02em;
   color: var(--fg-muted);
+  background: transparent;
+  /* 点击时不要出现任何阴影 / 外框 / 焦点环：
+     浏览器的默认 focus ring 和 active 高亮都会让页签看起来「鼓一块」，
+     这里显式清零，只靠下划线和字重区分激活态。 */
+  box-shadow: none;
+  outline: none;
+}
+.sidebar-tab:focus,
+.sidebar-tab:focus-visible,
+.sidebar-tab:active {
+  box-shadow: none;
+  outline: none;
+}
+/* 激活下划线画在**文字**上，不是画在整个格子底边。
+   整格底边会让「文件」的下划线一路顶到「大纲」脚下，两页签显得黏在一起。
+   宽度取所在格子的 70%（width:70% + 居中），既有存在感又不会碰到邻居。
+   padding-bottom 就是「文字到下划线」的呼吸间距，不能为 0，
+   否则文字会直接坐在线上（看着很挤很丑）。
+   按钮那边 padding-bottom:0 + align-items:flex-end 保证下划线贴住容器底边。 */
+.sidebar-tab-label {
+  display: block;
+  width: 70%;
+  margin: 0 auto;
+  padding-bottom: 6px;
+  text-align: center;
   border-bottom: 3px solid transparent;
 }
 .sidebar-tab:hover {
   color: var(--fg);
-  background: var(--bg-sunken);
+  /* 刻意不给 hover/active 加背景色块 —— 会被读成「阴影」。
+     只用文字颜色变亮提示可点，激活态交给下划线 + 字重。 */
+  background: transparent;
 }
 .sidebar-tab.active {
   color: var(--fg);
-  border-bottom-color: var(--fg);
   font-weight: 600;
+}
+.sidebar-tab.active .sidebar-tab-label {
+  border-bottom-color: var(--fg);
 }
 
 /* 侧栏右缘的拖拽把手：一条 3px 的热区，hover 时显示细竖线提示 */

@@ -17,13 +17,13 @@ export default function Sidebar({ style }: { style?: React.CSSProperties }) {
           className={`sidebar-tab${pane === 'files' ? ' active' : ''}`}
           onClick={() => setPane('files')}
         >
-          文件
+          <span className="sidebar-tab-label">文件</span>
         </button>
         <button
           className={`sidebar-tab${pane === 'outline' ? ' active' : ''}`}
           onClick={() => setPane('outline')}
         >
-          大纲
+          <span className="sidebar-tab-label">大纲</span>
         </button>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '../state/store'
+import { installHotkeys } from '../lib/commands'
 import MenuBar from './MenuBar'
 import Banner from './Banner'
 import Sidebar from './Sidebar'
@@ -20,6 +21,9 @@ export default function App() {
   useEffect(() => {
     void init()
   }, [init])
+
+  // 全局快捷键（Ctrl+S / Ctrl+Shift+S / Ctrl+Shift+N 等），只装一次
+  useEffect(() => installHotkeys(), [])
 
   // 关闭页面前提醒未保存内容
   useEffect(() => {
