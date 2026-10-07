@@ -29,11 +29,18 @@ interface Pending {
 }
 
 interface Ctx {
-  /** 光标所在行：这一行不隐藏任何标记，让用户能看见并编辑原始语法 */
+  /** 光标所在行（1 起），-1 表示无焦点。**仅**用于表格的跨行块级判断 */
   cursorLine: number
+  /** 光标绝对位置：决定「这一处标记是否露出来」的**唯一**依据；-1 表示无焦点 */
+  cursorPos: number
   out: Pending[]
   /** 本行已被占用的区间（左闭右开），用于跳过重叠命中 */
   claimed: [number, number][]
+  /**
+   * 本次扫描收集到的**全部**标记区间（不管有没有真的被隐藏）。
+   * 供上层回答「光标命中的是哪个标记」，用来避免每次移动光标都全文重扫。
+   */
+  marks: [number, number][]
   /** 代码围栏内部：不做内联解析 */
   inFence: boolean
   fenceMarker: string
@@ -57,45 +64,73 @@ function addLine(ctx: Ctx, lineFrom: number, cls: string): void {
   ctx.out.push({ from: lineFrom, to: lineFrom, deco: Decoration.line({ class: cls }) })
 }
 
-/** 隐藏一段标记；光标在这一行时不隐藏 */
-function hide(ctx: Ctx, lineNo: number, from: number, to: number): void {
+/**
+ * **块级前缀一律隐藏**，光标进去也不露。
+ *
+ * 覆盖：`# ` / `> ` / `- ` / ` ``` ` / `---` / 表格分隔行。
+ * 之所以比行内标记更绝，是因为用户对标题的诉求明确是
+ * 「鼠标点选时不要暴露 md 语言符号」—— 只要还留着「光标碰到就露」这条路，
+ * 鼠标点偏一点、方向键多按一下，符号就会突然冒出来打断阅读。
+ * 想改标题级别有明确的替代路径：光标停在标题第一个字前面按回车
+ * （`# 标题` → `# ` + `标题`，标题效果就没有了），再自己敲新的级别。
+ *
+ * 代价：光标能停在被隐藏的区间里（CM 的 replace 装饰默认不是原子的），
+ * 但那里什么都不显示 —— 这与 Typora 一致。
+ */
+function hide(ctx: Ctx, from: number, to: number): void {
   if (to <= from) return
-  if (ctx.cursorLine === lineNo) return
   ctx.out.push({ from, to, deco: Decoration.replace({}) })
   ctx.claimed.push([from, to])
 }
 
 /**
- * 算出「哪一行应当露出原始标记」，返回 -1 表示整篇都不露。
+ * **行内标记**：默认隐藏，光标真的落在这段标记里才露出来。
  *
- * 判定条件（三个都要满足，缺一不可）：
- *   1. 编辑器有焦点 —— 焦点在文件树/菜单时，用户看不到光标，不该给他看语法
- *   2. 光标不在文档开头（head > 0）
- *   3. 选区非空（拖选状态）
+ * 与块级前缀的区别在于「鼠标点一下会不会破功」：
+ * 行内标记（`**` / 反引号 / `[](url)`）周围全是正文，标记本身只有几个字符，
+ * 露出它不影响对整行的理解；而标题的 `#` 露出来会让整个标题突然「变形」，
+ * 视觉冲击大得多。所以行内保留「走进标记就显形」的逃生门，
+ * 用户改链接地址、改强调范围时还能看见原文。
  *
- * 条件 2 是修一个具体 bug：打开文档时 `view.focus()` 会把光标放到位置 0，
- * 于是「光标行」= 第 1 行 = 标题行，`#` 就露出来了。用户必须点一下正文才正常。
- * 根因是「刚打开」和「用户把光标放进去」在 position 0 上无法区分，
- * 所以用 head > 0 作为「用户确实动过」的代理信号。
+ * 每次都把区间登记进 ctx.marks —— 上层靠它做「光标命中的是哪个标记」的
+ * 二分查找（见 findMark），从而在选区变化时短路掉绝大多数全文重扫。
+ * 登记的区间保证**两两不相交**（命中已claimed 的会被跳过，
+ * 且配对规则的 head/tail 必然落在同一段互不重叠的命中内），
+ * 这是二分查找能给出确定答案的前提。
  */
+function hideInline(ctx: Ctx, from: number, to: number): void {
+  if (to <= from) return
+  ctx.marks.push([from, to])
+  // ⚠️ 无论显不显示都要占位：漏了会让后面的规则在同一起点重复命中，
+  // 而 marks 里就会出现**重叠区间**，二分查找 findMark 的答案不再唯一
+  // → 光标移动时的短路判断会误判，标记该显不显 / 不该显却显。
+  // 这两个子区间本来就落在本命中已claimed 的 [from,to] 里，重复登记无副作用。
+  ctx.claimed.push([from, to])
+  if (inMark(ctx, from, to)) return
+  ctx.out.push({ from, to, deco: Decoration.replace({}) })
+}
+
 /**
- * 算出「哪一行应当露出原始标记」，返回 -1 表示整篇都不露。
+ * 「光标是否正落在这一段标记内部」—— 决定标记显隐的**唯一**判据。
  *
- * 判定条件：
- *  1. 编辑器有焦点 —— 焦点在文件树/菜单时，用户看不到光标，不该给他看语法
- *  2. 选区非空（拖选状态）
+ * 为什么从「光标在本行」改成「光标在本段」：
+ * 早期逻辑是「光标所在行不隐藏任何标记」，于是鼠标点一下标题，`#` 立刻冒出来。
+ * 点击是阅读时最高频的动作，等于「一点就破功」，观感被破坏。
+ * 改成位置粒度后：
+ *   - 点标题**正文** → 光标在 `# ` 之后、不在标记区间里 → `#` 保持隐藏 ✅
+ *   - 光标被移进标记区间（Home / 左右方向键走过 `**` 中间）→ 才露出标记，可继续编辑
+ * 这样「阅读」与「编辑」的切换由光标是否真的落在标记上决定，
+ * 而不是「点在哪个字上」—— 后者完全不可预测。
  *
- * ⚠️ 这里**不能**用「head === 0 就返回 -1」当「刚打开文档」的代理信号：
- * 那是早期为了修「打开文档时首行标题露出 #」想出来的办法，但代价太大 ——
- * 光标真落在第 1 行时（Ctrl+Home、上方插入内容后回车）会永远不露标记，
- * 而用户此时恰恰在编辑这一行。更致命的是它让 `hasFocus` 之外又多一层
- * 隐式前提：光标在文档开头时，表格也永远不会被判定为「光标在表内」。
- * 现在打开文档不聚焦是 Editor 层的既定行为（见 Editor.tsx），
- * 这里只需 hasFocus 一个条件就够。
+ * 判据用 `>= from && < to` 的左闭右开：**光标紧贴标记之后**（正好等于 to）
+ * 算在标记之外，这样点标题正文第一个字时不会因为「刚好贴在 `> ` 后面」而误露。
+ *
+ * ⚠️ 无焦点时 ctx.cursorPos = -1，于是所有标记一律隐藏。
+ * 这与老实现里activeLine 返回 -1 的效果一致：焦点在文件树/菜单上时，
+ * 用户看不到光标，不该给他看原始语法。
  */
-function activeLine(view: EditorView): number {
-  if (!view.hasFocus) return -1
-  return view.state.doc.lineAt(view.state.selection.main.head).number
+function inMark(ctx: Ctx, from: number, to: number): boolean {
+  return ctx.cursorPos >= from && ctx.cursorPos < to
 }
 
 // --- 块级语法 -----------------------------------------------------------
@@ -165,7 +200,6 @@ const INLINE_RULES: InlineRule[] = [
 function processLine(
   state: EditorState,
   ctx: Ctx,
-  lineNo: number,
   lineText: string,
   lineFrom: number
 ): void {
@@ -190,7 +224,7 @@ function processLine(
       }
     }
     addLine(ctx, lineFrom, 'cm-md-fence')
-    hide(ctx, lineNo, lineFrom, lineFrom + lineText.length)
+    hide(ctx, lineFrom, lineFrom + lineText.length)
     return
   }
 
@@ -202,7 +236,7 @@ function processLine(
   // --- 分割线 ---
   if (HR_RE.test(lineText)) {
     addLine(ctx, lineFrom, 'cm-md-hr')
-    hide(ctx, lineNo, lineFrom, lineFrom + lineText.length)
+    hide(ctx, lineFrom, lineFrom + lineText.length)
     return
   }
 
@@ -211,8 +245,8 @@ function processLine(
   if (h) {
     addLine(ctx, lineFrom, `cm-md-h${h[1].length}`)
     const markEnd = lineFrom + h[1].length + h[2].length
-    hide(ctx, lineNo, lineFrom, markEnd)
-    processInline(ctx, markEnd, h[3], lineNo)
+    hide(ctx, lineFrom, markEnd)
+    processInline(ctx, markEnd, h[3])
     return
   }
 
@@ -221,8 +255,8 @@ function processLine(
   if (q) {
     addLine(ctx, lineFrom, 'cm-md-quote')
     const bodyFrom = lineFrom + q[1].length
-    hide(ctx, lineNo, lineFrom, bodyFrom)
-    processInline(ctx, bodyFrom, q[2], lineNo)
+    hide(ctx, lineFrom, bodyFrom)
+    processInline(ctx, bodyFrom, q[2])
     return
   }
 
@@ -232,12 +266,12 @@ function processLine(
     addLine(ctx, lineFrom, 'cm-md-li cm-md-task')
     const boxFrom = lineFrom + task[1].length + task[2].length + task[3].length
     const boxTo = boxFrom + task[4].length
-    hide(ctx, lineNo, lineFrom, boxFrom)
+    hide(ctx, lineFrom, boxFrom)
     // 复选框：点击直接改文档里的 [ ] / [x]，长度相同所以光标不会跳
     const checked = task[4][1] === 'x' || task[4][1] === 'X'
     add(ctx, boxFrom, boxTo, Decoration.replace({ widget: new CheckboxWidget(checked, boxFrom, boxTo) }))
     const bodyFrom = boxTo + task[5].length
-    processInline(ctx, bodyFrom, task[6], lineNo)
+    processInline(ctx, bodyFrom, task[6])
     return
   }
 
@@ -246,8 +280,8 @@ function processLine(
   if (ul) {
     addLine(ctx, lineFrom, 'cm-md-li')
     const bodyFrom = lineFrom + ul[1].length + ul[2].length + ul[3].length
-    hide(ctx, lineNo, lineFrom, bodyFrom)
-    processInline(ctx, bodyFrom, ul[4], lineNo)
+    hide(ctx, lineFrom, bodyFrom)
+    processInline(ctx, bodyFrom, ul[4])
     return
   }
 
@@ -258,19 +292,19 @@ function processLine(
     const numFrom = lineFrom + ol[1].length
     const bodyFrom = numFrom + ol[2].length + ol[3].length + ol[4].length
     // 只隐藏数字前的缩进，序号本身留着，用户能直接确认是第几项
-    hide(ctx, lineNo, lineFrom, numFrom)
-    processInline(ctx, bodyFrom, ol[5], lineNo)
+    hide(ctx, lineFrom, numFrom)
+    processInline(ctx, bodyFrom, ol[5])
     return
   }
 
   // --- 普通段落 ---
   addLine(ctx, lineFrom, 'cm-md-p')
-  processInline(ctx, lineFrom, lineText, lineNo)
+  processInline(ctx, lineFrom, lineText)
   void state
 }
 
 /** 解析行内标记 */
-function processInline(ctx: Ctx, offset: number, text: string, lineNo: number): void {
+function processInline(ctx: Ctx, offset: number, text: string): void {
   if (!text) return
   for (const rule of INLINE_RULES) {
     rule.re.lastIndex = 0
@@ -289,8 +323,10 @@ function processInline(ctx: Ctx, offset: number, text: string, lineNo: number): 
       if (rule.image) {
         const src = m[2]
         if (!src) continue
-        // 光标在这一行时露出原始语法，方便改链接
-        if (ctx.cursorLine !== lineNo) {
+        // 图片是整段替换：光标落进来时露出原始语法（方便改链接），否则渲染成 <img>
+        // 登记进 marks：光标进出图片会改变结果，短路判断必须知道这件事
+        ctx.marks.push([from, to])
+        if (!inMark(ctx, from, to)) {
           add(ctx, from, to, Decoration.replace({ widget: new ImageWidget(src, m[1] ?? '') }))
         } else {
           add(ctx, from, to, Decoration.mark({ class: 'cm-md-link' }))
@@ -302,14 +338,11 @@ function processInline(ctx: Ctx, offset: number, text: string, lineNo: number): 
         ctx.out.push({ from, to, deco: Decoration.mark({ class: rule.cls }) })
         ctx.claimed.push([from, to])
       }
-      if (ctx.cursorLine === lineNo) continue
-      // 藏首尾标记，保留可见内容
-      if (rule.head > 0) {
-        ctx.out.push({ from, to: from + rule.head, deco: Decoration.replace({}) })
-      }
-      if (rule.tail > 0) {
-        ctx.out.push({ from: to - rule.tail, to, deco: Decoration.replace({}) })
-      }
+      // 藏首尾标记，保留可见内容。
+      // 判据是「光标是否在**这一小段标记**里」而不是「在不在本行」——
+      // 否则点一下 `**粗体**` 里的文字，整行的 `**` 就都冒出来了。
+      if (rule.head > 0) hideInline(ctx, from, from + rule.head)
+      if (rule.tail > 0) hideInline(ctx, to - rule.tail, to)
     }
   }
 }
@@ -610,7 +643,6 @@ class ImageWidget extends WidgetType {
  * 交互：点击任意单元格 → 把光标 dispatch 到该单元格文本的源码位置，
  * 表格随即回落成源码行（因为 cursorLine 落进块内）→ 用户可以正常改字。
  * 光标离开表格后自动渲染回 <table>。
- * 这是「所见即所得」与「可编辑」之间唯一自洽的衔接方式。
  */
 class TableWidget extends WidgetType {
   constructor(readonly block: TableBlock) {
@@ -690,15 +722,43 @@ class TableWidget extends WidgetType {
  * StateField + EditorView.decorations 是官方唯一允许块级装饰的入口。
  */
 
-/** 光标所在行（1 起），-1 表示整篇都不露标记。由 cursorSync 经 effect 写入 */
+/**
+ * 上一次 buildFrom 收集到的全部标记区间（按 from 升序）。
+ * 用于「光标命中的是哪个标记」的二分查找，避免每次按方向键都全文重扫。
+ */
+let markIndex: [number, number][] = []
+
+/** 二分查找：光标 pos 命中的标记下标；没命中返回 -1 */
+function findMark(pos: number): number {
+  let lo = 0
+  let hi = markIndex.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const [a, b] = markIndex[mid]
+    if (pos < a) hi = mid - 1
+    else if (pos >= b) lo = mid + 1
+    else return mid
+  }
+  return -1
+}
+
+/** 编辑器是否有焦点。无焦点时不该给用户看任何原始语法 */
+let focusProxy = false
+/** 上一次 buildFrom 时「光标命中的标记下标」，-1 = 没命中任何标记 */
+let hitMarkProxy = -1
+/** 上一次 buildFrom 时的光标行号（表格按行判断用） */
 let cursorLineProxy = -1
 
 function buildFrom(state: EditorState): DecorationSet {
   const out: Pending[] = []
+  const marks: [number, number][] = []
+  const sel = state.selection.main
   const ctx: Ctx = {
-    cursorLine: cursorLineProxy,
+    cursorLine: focusProxy ? state.doc.lineAt(sel.head).number : -1,
+    cursorPos: focusProxy ? sel.head : -1,
     out,
     claimed: [],
+    marks,
     inFence: false,
     fenceMarker: '',
   }
@@ -741,12 +801,12 @@ function buildFrom(state: EditorState): DecorationSet {
             const tl = state.doc.line(k)
             ctx.claimed = []
             if (k === block.delimLine) {
-              // 分隔行是纯语法，光标不在这一行时整行藏掉
+              // 分隔行整行都是语法：光标真落进去（要改 `:---:` 的对齐方式）时才露出
               addLine(ctx, tl.from, 'cm-md-tr-delim')
-              hide(ctx, k, tl.from, tl.to)
+              hideInline(ctx, tl.from, tl.to)
             } else {
               addLine(ctx, tl.from, k === block.startLine ? 'cm-md-tr cm-md-tr-head' : 'cm-md-tr')
-              processInline(ctx, tl.from, tl.text, k)
+              processInline(ctx, tl.from, tl.text)
             }
           }
         } else {
@@ -765,8 +825,15 @@ function buildFrom(state: EditorState): DecorationSet {
       }
     }
 
-    processLine(state, ctx, n, line.text, line.from)
+    processLine(state, ctx, line.text, line.from)
   }
+
+  // 记录本次的推导结果，供 update() 判断「下一次选区变化是否需要重算」。
+  // markIndex 必须排序：扫描是按行推进的，但**行内**的标记是按规则顺序
+  // push 的（行内代码规则先跑），不保证全局 from 有序，二分会失效。
+  markIndex = marks.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  hitMarkProxy = focusProxy ? findMark(state.selection.main.head) : -1
+  cursorLineProxy = ctx.cursorLine
 
   return Decoration.set(
     out.map((p) => p.deco.range(p.from, p.to)),
@@ -775,64 +842,68 @@ function buildFrom(state: EditorState): DecorationSet {
 }
 
 /**
- * 携带「光标行」的空文档 transaction。
+ * 携带「焦点状态」的空文档 transaction。
  *
  * 为什么必须用 effect 显式传，而不是模块级变量：
- * StateField 的 `create` 在插件构造之前就跑，此时 ViewPlugin 还没赋值，
+ * StateField 的 `create` 在插件构造之前就跑，此时 updateListener 还没跑过，
  * 模块级变量会是初始值 —— 装饰算两遍（第二遍才对）或者干脆算错。
- * 走 transaction 则保证「算装饰时用的光标行」与「触发重算的光标行」同源。
+ * 走 transaction 则保证「算装饰时用的光标」与「触发重算的光标」同源。
  */
-const setCursorLine = StateEffect.define<number>()
+const setFocus = StateEffect.define<boolean>()
 
 const decoField = StateField.define<DecorationSet>({
   create: (state) => buildFrom(state),
   update(decos, tr) {
-    // 文档变了最重要：先按新文档重扫全文（光标行由 ViewPlugin 另行同步）
+    // 文档变了最重要：先按新文档重扫全文
     if (tr.docChanged) return buildFrom(tr.state)
 
-    let line = cursorLineProxy
     let hasEffect = false
     for (const e of tr.effects) {
-      if (e.is(setCursorLine)) {
-        line = e.value
+      if (e.is(setFocus)) {
+        focusProxy = e.value
         hasEffect = true
       }
     }
-    // 没有任何需要重算的理由 → 复用旧装饰
+    if (hasEffect) return buildFrom(tr.state)
+
     // 注意：Transaction 上是 `selection`，ViewUpdate 上才是 `selectionSet`
-    if (!hasEffect && !tr.selection) return decos
-    cursorLineProxy = line
+    if (!tr.selection) return decos
+
+    // ⚠️ 选区变了**不一定**要重算装饰。只有两种情况会改变结果：
+    //   1. 光标「命中 / 脱离」了某个标记区间 → 该标记的显隐要翻转
+    //   2. 光标跨行 → 表格的按行判断（cursorLine）失效
+    // 同一行里在正文上左右移动光标时两者都不变，直接复用旧装饰。
+    // 少了这个判断，每按一次方向键都会全文重扫一遍，长文档下会明显卡。
+    const head = tr.state.selection.main.head
+    if (!focusProxy) return decos
+    const hit = findMark(head)
+    const line = tr.state.doc.lineAt(head).number
+    if (hit === hitMarkProxy && line === cursorLineProxy) return decos
     return buildFrom(tr.state)
   },
   provide: (f) => EditorView.decorations.from(f),
 })
 
 /**
- * 光标行同步：只有 view 才知道 hasFocus，所以光标行由它算出后经 effect 传给 StateField。
+ * 焦点同步：只有 view 才知道 hasFocus，所以焦点状态由它算出后经 effect 传给 StateField。
  *
  * ⚠️ 这里用 **EditorView.updateListener** 而不是 ViewPlugin.fromClass(...).update，
  * 是踩过坑才换的：ViewPlugin 的 update 只在「视图需要重绘」时触发，
  * 而 `view.dispatch({ selection })` 这类纯选区变化不一定会走到它 ——
  * 实测把光标在表格内外来回移动，ViewPlugin.update 的调用计数死死不动，
- * 导致 cursorLineProxy 永远停在旧值，表现为「光标进了表格，表格死活不回落源码」，
+ * 导致光标状态永远停在旧值，表现为「光标进了表格，表格死活不回落源码」，
  * 且**没有任何报错**。updateListener 对每个 transaction 都会触发，是这里唯一可靠的钩子。
  *
- * 防循环只需一条铁律：**只在行号真的变化时才 dispatch**。
- * 行号比较是纯函数判断，不依赖任何跨调用状态，最不容易出错。
- * 代价是同一行内移动光标会多扫一遍全文，对本项目可接受。
+ * 这里**只**同步焦点，选区变化的处理全在 decoField.update 里
+ * （它能直接拿到 tr.state，且自带「命中标记是否变化」的短路判断）。
+ * 早前在这里也 dispatch 选区，会导致一次移动触发两遍全文扫描。
  */
 const cursorSync = EditorView.updateListener.of((u) => {
-  const line = activeLine(u.view)
-
-  // 文档变化由 decoField 自己处理；这里只同步光标行，
-  // 否则一次按键会触发两遍全文扫描
-  if (u.docChanged) {
-    cursorLineProxy = line
-    return
-  }
-  if (line === cursorLineProxy) return
-  cursorLineProxy = line
-  u.view.dispatch({ effects: setCursorLine.of(line) })
+  // 文档变化时 decoField 自己会重扫，这里不能插手，否则一次按键扫两遍
+  if (u.docChanged) return
+  const focused = u.view.hasFocus
+  if (focused === focusProxy) return
+  u.view.dispatch({ effects: setFocus.of(focused) })
 })
 
 export function livePreview(): Extension {

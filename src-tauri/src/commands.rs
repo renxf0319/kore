@@ -68,6 +68,8 @@ pub fn read_dir(path: String) -> Result<Vec<FileEntry>, String> {
 const SUPPORTED_EXTS: &[&str] = &[
     "md", "markdown", "mdown", "txt", "text", "log", "sql", "conf", "cfg", "ini", "properties",
     "yaml", "yml", "json", "toml", "xml",
+    // 代码文件（前端会挂 javascript() 高亮，见 src/lib/filetype.ts 的 CODE 集合）
+    "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx",
 ];
 
 fn is_supported_ext(path: &Path) -> bool {
@@ -94,7 +96,7 @@ pub fn read_file(path: String) -> Result<String, String> {
     }
     if !is_supported_ext(p) {
         return Err(format!(
-            "暂不支持打开「{}」（{}）。仅支持纯文本类型：.md / .txt / .sql / .conf / .properties / .yaml",
+            "暂不支持打开「{}」（{}）。仅支持文本与代码类型：.md / .txt / .sql / .conf / .properties / .yaml / .js / .ts",
             p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone()),
             ext_of(p)
         ));

@@ -197,7 +197,7 @@ async function browserOpenFile(): Promise<OpenedFile | null> {
     multiple: false,
     types: [
       {
-        description: 'Markdown / 纯文本 / SQL / 配置 / YAML',
+        description: 'Markdown / 纯文本 / SQL / 配置 / YAML / JS / TS',
         accept: { 'text/plain': OPEN_EXTS },
       },
     ],
@@ -227,7 +227,7 @@ async function browserSaveAs(suggestedName: string): Promise<string | null> {
     suggestedName: keepExt(suggestedName),
     types: [
       {
-        description: 'Markdown / 纯文本 / SQL / 配置 / YAML',
+        description: 'Markdown / 纯文本 / SQL / 配置 / YAML / JS / TS',
         accept: { 'text/plain': OPEN_EXTS },
       },
     ],
@@ -287,6 +287,7 @@ function openFilters() {
     { name: '配置', extensions: ['conf', 'cfg', 'ini', 'properties'] },
     { name: 'YAML', extensions: ['yaml', 'yml'] },
     { name: 'JSON / XML / TOML', extensions: ['json', 'xml', 'toml'] },
+    { name: 'JavaScript / TypeScript', extensions: ['js', 'mjs', 'cjs', 'jsx', 'ts', 'mts', 'cts', 'tsx'] },
   ]
 }
 

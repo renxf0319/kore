@@ -444,11 +444,18 @@ body.resizing-col * {
   padding: 40px 0 45vh;
 }
 .editor-host .cm-content {
-  /* 排版模型对齐 Typora：**左侧固定留白，不做 max-width 居中**。
-     之前用 max-width:800px + margin:auto，居中后起点会随窗口宽度漂移
-     （1080 宽时起点距编辑区左沿仅 42px，看起来贴边太左）。
-     Typora 是左边留一块固定空白、正文顺势排到右边，起点稳定且观感一致。 */
-  padding: 0 48px 0 96px;
+  /* 排版模型对齐 Typora：**正文限宽居中**。
+     早期版本只有固定左留白、没有上限，左侧栏一隐藏（窗口很宽）正文就被拉成
+     一条极长的行，读起来极不协调 —— 视线扫过时容易串行。
+     现在整个内容盒封顶 980px、行内文字区 900px（约 56 个中文字符 / 110 个西文字符，
+     正好一行内读完）；窗口不够宽时 max-width 不生效，自动退回满宽排版。
+
+     ⚠️ padding 必须左右对称：内容盒居中（margin:0 auto）后，
+     不对称的 padding 会让「文字起点」相对窗口左沿的位置随宽度漂移 ——
+     这正是早期版本不用 max-width 的原因，一旦要限宽就必须对称。 */
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 40px;
   caret-color: var(--accent);
 }
 .editor-host .cm-gutters {
@@ -467,7 +474,26 @@ body.resizing-col * {
   font-size: 14px;
 }
 .editor-host .cm-plain-content {
-  padding: 0 48px 0 96px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 40px;
+  caret-color: var(--accent);
+}
+
+/* 代码模式（.js / .ts / .jsx / .tsx …）
+   与纯文本模式的区别：**不装 WYSIWYG 装饰**（源码里的 `#` / `*` / `-` 都保持原样），
+   只靠等宽字体 + javascript() 的语法高亮表达结构。
+   代码普遍比散文长、也更怕折行，所以内容盒放到 1100px（Markdown 是 980px）。 */
+.editor-host .cm-scroller:has(.cm-code-content) {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  line-height: 1.65;
+  font-size: 14px;
+  tab-size: 2;
+}
+.editor-host .cm-code-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 40px;
   caret-color: var(--accent);
 }
 

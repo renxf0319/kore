@@ -16,6 +16,7 @@ import {
   indentWithTab,
 } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
+import { javascript } from '@codemirror/lang-javascript'
 import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
@@ -29,7 +30,7 @@ import {
 import { useStore } from '../state/store'
 import { livePreview, lineToPos } from '../lib/wysiwyg'
 import { fenceLangCompletion } from '../lib/fenceLang'
-import { isMarkdownFile } from '../lib/filetype'
+import { isMarkdownFile, isCodeFile } from '../lib/filetype'
 
 /**
  * 覆盖 defaultHighlightStyle 里「标题带下划线」的规则。
@@ -54,13 +55,21 @@ const themeCompartment = new Compartment()
  * 按文件类型选择编辑模式。
  *
  * Markdown（.md/.markdown/.mdown 与未命名新文档）走 WYSIWYG：装饰引擎隐藏语法标记。
+ * 代码（.js/.ts/.jsx/.tsx…）走 javascript()：有语法树，关键字/字符串/注释自动着色，
+ *   且**不装** livePreview —— 代码里的 `#`（私有字段）、`*`（指针解引用）不是标记语法，
+ *   被装饰引擎隐藏就等于毁掉源码。
  * 其它纯文本类型（.sql/.yaml/.conf/.properties/.txt…）**必须**走 plain：
  * 若给它们套上 Markdown 规则，`# comment` 整行会被当标题隐藏、`*`、`_`、`- `
  * 会被当强调/列表标记吃掉 —— 用户看到的就不是原文，而是「乱码」。
  */
 function langExtension(nameOrPath: string | null): Extension {
-  if (!isMarkdownFile(nameOrPath)) return []
-  return [markdown(), livePreview()]
+  if (isMarkdownFile(nameOrPath)) return [markdown(), livePreview()]
+  if (isCodeFile(nameOrPath)) {
+    // javascript() 同时覆盖 js/jsx/ts/tsx（TS 关键字由 TS 插件识别），
+    // 不需要为 .ts 单独开一套配置
+    return javascript({ jsx: true, typescript: true })
+  }
+  return []
 }
 
 export default function Editor() {
@@ -82,10 +91,15 @@ export default function Editor() {
     const id = active
     // 未命名文档（path 为 null）按 Markdown 处理
     const mdMode = isMarkdownFile(tab?.path ?? null)
+    const codeMode = isCodeFile(tab?.path ?? null)
     const asMarkdown = langExtension(tab?.path ?? null)
     // 纯文本模式换等宽字体：SQL / YAML / properties 都靠缩进与对齐表达结构，
-    // 用正文字体渲染会让层次全糊在一起。
-    const contentClass = mdMode ? 'cm-typora-content' : 'cm-plain-content'
+    // 用正文字体渲染会让层次全糊在一起。代码文件同理，且额外用深色底衬托代码块。
+    const contentClass = mdMode
+      ? 'cm-typora-content'
+      : codeMode
+        ? 'cm-code-content'
+        : 'cm-plain-content'
 
     const state = EditorState.create({
       doc,
@@ -113,7 +127,13 @@ export default function Editor() {
                 defaultKeymap: true,
               }),
             ]
-          : []),
+          : codeMode
+            ? [
+                // 代码模式用 javascript() 自带的补全源（关键字 / 成员 / 文档内标识符），
+                // 不像 Markdown 那样要 override 掉默认源
+                autocompletion({ activateOnTyping: true }),
+              ]
+            : []),
         themeCompartment.of(theme === 'dark' ? oneDark : []),
         keymap.of([
           ...closeBracketsKeymap,

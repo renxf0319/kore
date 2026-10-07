@@ -32,6 +32,14 @@ const LABELS: Record<string, string> = {
   json: 'JSON',
   toml: 'TOML',
   xml: 'XML',
+  js: 'JavaScript',
+  mjs: 'JavaScript',
+  cjs: 'JavaScript',
+  jsx: 'JavaScript',
+  ts: 'TypeScript',
+  mts: 'TypeScript',
+  cts: 'TypeScript',
+  tsx: 'TypeScript',
 }
 
 /**
@@ -43,13 +51,26 @@ const SUPPORTED = new Set(Object.keys(LABELS))
 /** 走 WYSIWYG（Markdown 装饰 + 大纲 + 导出）的扩展名 */
 const MARKDOWN = new Set(['md', 'markdown', 'mdown'])
 
+/**
+ * 走「代码模式」的扩展名（等宽字体 + 对应语言的高亮 + 不隐藏任何标记）。
+ *
+ * 与其它纯文本类型分开，是因为它们有真正的语法树可用：
+ * 交给 CodeMirror 的 javascript() 后关键字/字符串/注释/数字都会着色，
+ * 对纯文本类型做同样的事只会得到一堆误报的高亮（比如 .conf 里的 `#`）。
+ */
+const CODE = new Set([
+  'js', 'mjs', 'cjs', 'jsx',
+  'ts', 'mts', 'cts', 'tsx',
+])
+
 /** 供对话框 / 提示文案使用的可读清单 */
 export const SUPPORTED_EXT_LIST = [...SUPPORTED]
   .map((e) => `.${e}`)
   .join(' / ')
 
 /** 提示里只列用户真的会用的类型，避免一行太长 */
-const SHORT_LIST = '.md / .markdown / .txt / .sql / .conf / .properties / .yaml'
+const SHORT_LIST =
+  '.md / .markdown / .txt / .sql / .conf / .properties / .yaml / .js / .ts'
 
 /** 取小写扩展名；无扩展名返回空串。`a.MD` 与 `a.md` 等价。 */
 export function extOf(nameOrPath: string): string {
@@ -72,17 +93,24 @@ export function isMarkdownFile(nameOrPath: string | null): boolean {
   return MARKDOWN.has(extOf(nameOrPath))
 }
 
+/** 是否按代码处理（带语言高亮；与 Markdown 一样，标记一律显示） */
+export function isCodeFile(nameOrPath: string | null): boolean {
+  if (!nameOrPath) return false
+  return CODE.has(extOf(nameOrPath))
+}
+
 /** 类型的展示名；不支持时返回 `null` */
 export function kindLabel(nameOrPath: string): string | null {
   return LABELS[extOf(nameOrPath)] ?? null
 }
 
-/** 文件树里排序用的分组序号：目录 < Markdown < 其它文本。数字越小越靠前。 */
+/** 文件树里排序用的分组序号：目录 < Markdown < 代码 < 其它文本。数字越小越靠前。 */
 export function rankOf(nameOrPath: string): number {
   const ext = extOf(nameOrPath)
   if (MARKDOWN.has(ext)) return 1
-  if (SUPPORTED.has(ext)) return 2
-  return 3
+  if (CODE.has(ext)) return 2
+  if (SUPPORTED.has(ext)) return 3
+  return 4
 }
 
 /**
@@ -93,7 +121,7 @@ export function unsupportedMessage(nameOrPath: string): string {
   const base = nameOrPath.split(/[\\/]/).pop() ?? nameOrPath
   const ext = extOf(base)
   const shown = ext ? `.${ext}` : '无扩展名'
-  return `暂不支持打开「${base}」（${shown}）。仅支持纯文本类型：${SHORT_LIST}`
+  return `暂不支持打开「${base}」（${shown}）。仅支持文本与代码类型：${SHORT_LIST}`
 }
 
 /** Rust 侧同款白名单，改动时必须两边同步（见 src-tauri/src/commands.rs） */
