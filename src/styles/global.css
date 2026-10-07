@@ -540,6 +540,48 @@ body.resizing-col * {
   padding-left: 12px;
 }
 
+/* ---------------- 代码围栏语言候选（输入 ``` 后弹出） ---------------- */
+/* 复用 CodeMirror 的 .cm-tooltip.cm-tooltip-autocomplete 容器，
+   这里只做配色和圆角，让它和整体风格一致。 */
+.editor-host .cm-tooltip.cm-tooltip-autocomplete {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  max-height: 260px;
+}
+.editor-host .cm-tooltip.cm-tooltip-autocomplete > ul {
+  font-family: inherit;
+  font-size: 13px;
+  max-height: 240px;
+}
+.editor-host .cm-tooltip.cm-tooltip-autocomplete > ul > li {
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1.5;
+}
+/* 悬停/选中项：跟菜单 hover 用同一套色 */
+.editor-host .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* 右侧补的标识符（如显示名 Java 与实际填入 java 不同） */
+.editor-host .cm-tooltip.cm-tooltip-autocomplete .cm-completionDetail {
+  font-style: normal;
+  color: var(--fg-muted);
+  margin-left: 10px;
+  font-size: 12px;
+}
+.editor-host .cm-tooltip.cm-tooltip-autocomplete li[aria-selected] .cm-completionDetail {
+  color: var(--accent);
+  opacity: 0.75;
+}
+/* 「无匹配语言」这类提示项不该看起来像可选条目 */
+.editor-host .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  font-weight: 400;
+}
+
 .cm-md-strong {
   font-weight: 700;
   color: var(--heading-fg);

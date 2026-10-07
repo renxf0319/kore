@@ -20,8 +20,15 @@ import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@code
 import { oneDark } from '@codemirror/theme-one-dark'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { tags } from '@lezer/highlight'
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+} from '@codemirror/autocomplete'
 import { useStore } from '../state/store'
 import { livePreview, lineToPos } from '../lib/wysiwyg'
+import { fenceLangCompletion } from '../lib/fenceLang'
 
 /**
  * 覆盖 defaultHighlightStyle 里「标题带下划线」的规则。
@@ -72,13 +79,23 @@ export default function Editor() {
         highlightSelectionMatches(),
         markdown(),
         syntaxHighlighting(koreHighlightStyle, { fallback: true }),
-        // Typora 风格：语法标记由装饰引擎隐藏，编辑器本体保持纯 Markdown
+        // 输入 ``` 后提示语言标识符（认不全也能选）
+        closeBrackets(),
+        autocompletion({
+          override: [fenceLangCompletion],
+          activateOnTyping: true,
+          // 行内已经有完整单词（如写了 `java` 之外的正文）时不打扰
+          defaultKeymap: true,
+        }),
+        // 语法标记由装饰引擎隐藏，编辑器本体保持纯 Markdown
         livePreview(),
         themeCompartment.of(theme === 'dark' ? oneDark : []),
         keymap.of([
+          ...closeBracketsKeymap,
           ...defaultKeymap,
           ...historyKeymap,
           ...searchKeymap,
+          ...completionKeymap,
           indentWithTab,
           { key: 'Mod-s', preventDefault: true, run: () => (void save(), true) },
           { key: 'Mod-shift-s', preventDefault: true, run: () => (void saveAs(), true) },
