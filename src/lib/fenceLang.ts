@@ -57,6 +57,7 @@ const LANGS: LangSpec[] = [
   { id: 'cmake', label: 'CMake', alias: ['cmake'] },
   { id: 'diff', label: 'Diff', alias: ['diff', 'patch'] },
   { id: 'ini', label: 'INI', alias: ['ini', 'conf', '配置'] },
+  { id: 'properties', label: 'Properties', alias: ['properties', 'props', 'property'] },
   { id: 'text', label: '纯文本', alias: ['text', 'txt', 'plain', '文本'] },
 ]
 
