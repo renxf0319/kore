@@ -1,12 +1,5 @@
-import {
-  Decoration,
-  EditorView,
-  ViewPlugin,
-  WidgetType,
-  type DecorationSet,
-  type ViewUpdate,
-} from '@codemirror/view'
-import type { EditorState, Extension } from '@codemirror/state'
+import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
+import { StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state'
 
 // ---------------------------------------------------------------------------
 // Typora 风格「所见即所得」装饰引擎
@@ -85,11 +78,24 @@ function hide(ctx: Ctx, lineNo: number, from: number, to: number): void {
  * 根因是「刚打开」和「用户把光标放进去」在 position 0 上无法区分，
  * 所以用 head > 0 作为「用户确实动过」的代理信号。
  */
+/**
+ * 算出「哪一行应当露出原始标记」，返回 -1 表示整篇都不露。
+ *
+ * 判定条件：
+ *  1. 编辑器有焦点 —— 焦点在文件树/菜单时，用户看不到光标，不该给他看语法
+ *  2. 选区非空（拖选状态）
+ *
+ * ⚠️ 这里**不能**用「head === 0 就返回 -1」当「刚打开文档」的代理信号：
+ * 那是早期为了修「打开文档时首行标题露出 #」想出来的办法，但代价太大 ——
+ * 光标真落在第 1 行时（Ctrl+Home、上方插入内容后回车）会永远不露标记，
+ * 而用户此时恰恰在编辑这一行。更致命的是它让 `hasFocus` 之外又多一层
+ * 隐式前提：光标在文档开头时，表格也永远不会被判定为「光标在表内」。
+ * 现在打开文档不聚焦是 Editor 层的既定行为（见 Editor.tsx），
+ * 这里只需 hasFocus 一个条件就够。
+ */
 function activeLine(view: EditorView): number {
   if (!view.hasFocus) return -1
-  const head = view.state.selection.main.head
-  if (head === 0 && view.state.selection.main.empty) return -1
-  return view.state.doc.lineAt(head).number
+  return view.state.doc.lineAt(view.state.selection.main.head).number
 }
 
 // --- 块级语法 -----------------------------------------------------------
@@ -105,21 +111,51 @@ const TASK_RE = /^(\s*)([-*+])(\s+)(\[[ xX]\])(\s*)(.*)$/
  * 行内规则。
  * head/tail = 成对标记的首尾字符数，0 表示该侧不隐藏（链接只藏头尾的方括号/URL）。
  * 优先级即数组顺序：先命中的规则占用区间，后面的规则不能再吃到同一段文本。
+ *
+ * dom 是**同一批规则的第二个消费者**：表格单元格要生成真实 DOM 节点（<code>/<a>），
+ * 而装饰引擎只需要 class。两边共用一份正则与优先级，避免两套规则各自漂移。
  */
-const INLINE_RULES: { re: RegExp; cls: string; head: number; tail: number; image?: boolean }[] =
-  [
-    // 行内代码最先：避免 `**x**` 里的星号被当成强调
-    { re: /`([^`\n]+)`/g, cls: 'cm-md-code', head: 1, tail: 1 },
-    { re: /!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: '', head: 0, tail: 0, image: true },
-    { re: /\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: 'cm-md-link', head: 1, tail: 0 },
-    { re: /\*\*\*([^*]+)\*\*\*/g, cls: 'cm-md-strong cm-md-em', head: 3, tail: 3 },
-    { re: /\*\*([^*]+)\*\*/g, cls: 'cm-md-strong', head: 2, tail: 2 },
-    { re: /__([^_]+)__/g, cls: 'cm-md-strong', head: 2, tail: 2 },
-    { re: /~~([^~]+)~~/g, cls: 'cm-md-del', head: 2, tail: 2 },
-    { re: /==([^=]+)==/g, cls: 'cm-md-mark', head: 2, tail: 2 },
-    { re: /(?<![*\w])\*([^*\n]+)\*(?!\*)/g, cls: 'cm-md-em', head: 1, tail: 1 },
-    { re: /(?<![_\w])_([^_\n]+)_(?![_\w])/g, cls: 'cm-md-em', head: 1, tail: 1 },
-  ]
+interface InlineRule {
+  re: RegExp
+  cls: string
+  head: number
+  tail: number
+  image?: boolean
+  dom?: (m: RegExpExecArray) => Node
+}
+
+const el = <K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  cls?: string
+): HTMLElementTagNameMap[K] => {
+  const e = document.createElement(tag)
+  if (cls) e.className = cls
+  return e
+}
+
+const INLINE_RULES: InlineRule[] = [
+  // 行内代码最先：避免 `**x**` 里的星号被当成强调
+  { re: /`([^`\n]+)`/g, cls: 'cm-md-code', head: 1, tail: 1,
+    dom: (m) => { const c = el('code', 'cm-md-code'); c.textContent = m[1]; return c } },
+  { re: /!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: '', head: 0, tail: 0, image: true,
+    dom: (m) => { const i = el('img', 'cm-md-img'); i.src = m[2]; i.alt = m[1] ?? ''; return i } },
+  { re: /\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: 'cm-md-link', head: 1, tail: 0,
+    dom: (m) => { const a = el('a', 'cm-md-link'); a.href = m[2]; a.textContent = m[1]; return a } },
+  { re: /\*\*\*([^*]+)\*\*\*/g, cls: 'cm-md-strong cm-md-em', head: 3, tail: 3,
+    dom: (m) => { const s = el('strong', 'cm-md-strong'); const e2 = el('em'); e2.textContent = m[1]; s.appendChild(e2); return s } },
+  { re: /\*\*([^*]+)\*\*/g, cls: 'cm-md-strong', head: 2, tail: 2,
+    dom: (m) => { const s = el('strong', 'cm-md-strong'); s.textContent = m[1]; return s } },
+  { re: /__([^_]+)__/g, cls: 'cm-md-strong', head: 2, tail: 2,
+    dom: (m) => { const s = el('strong', 'cm-md-strong'); s.textContent = m[1]; return s } },
+  { re: /~~([^~]+)~~/g, cls: 'cm-md-del', head: 2, tail: 2,
+    dom: (m) => { const s = el('del', 'cm-md-del'); s.textContent = m[1]; return s } },
+  { re: /==([^=]+)==/g, cls: 'cm-md-mark', head: 2, tail: 2,
+    dom: (m) => { const s = el('mark', 'cm-md-mark'); s.textContent = m[1]; return s } },
+  { re: /(?<![*\w])\*([^*\n]+)\*(?!\*)/g, cls: 'cm-md-em', head: 1, tail: 1,
+    dom: (m) => { const s = el('em', 'cm-md-em'); s.textContent = m[1]; return s } },
+  { re: /(?<![_\w])_([^_\n]+)_(?![_\w])/g, cls: 'cm-md-em', head: 1, tail: 1,
+    dom: (m) => { const s = el('em', 'cm-md-em'); s.textContent = m[1]; return s } },
+]
 
 /**
  * 解析一行。
@@ -278,6 +314,221 @@ function processInline(ctx: Ctx, offset: number, text: string, lineNo: number): 
   }
 }
 
+// --- 表格 ----------------------------------------------------------------
+//
+// 表格是唯一必须**跨行**处理的块级语法：表头行 + 分隔行（`|---|---|`）+ 若干数据行。
+// 单行装饰画不出表格，所以整块用 Decoration.replace({block:true}) 换成一个真 <table>。
+//
+// 光标进入表格时**整块回落成源码**（和光标行的处理逻辑一致）：
+// Widget 里的内容不可编辑，要改字必须回到源码。这个取舍是刻意的 —— 换来的是
+// 「文档永远只是纯 Markdown」，不需要维护富文本 ↔ 源码的双向序列化。
+
+type Align = 'left' | 'center' | 'right'
+
+interface TableCell {
+  text: string
+  /** 单元格文本在文档中的绝对位置，点击表格时把光标送到这里 */
+  from: number
+  to: number
+}
+
+interface TableRow {
+  cells: TableCell[]
+}
+
+interface TableBlock {
+  startLine: number
+  delimLine: number
+  endLine: number
+  header: TableRow
+  rows: TableRow[]
+  aligns: (Align | null)[]
+  /** Widget.eq 用：内容变化才重建 DOM */
+  sig: string
+}
+
+/**
+ * 拆一行成单元格。
+ *
+ * 两个容易踩的坑：
+ *  1. `\|` 是转义竖线，不能当分隔符（GFM 允许单元格文本里出现裸竖线）
+ *  2. 行首/行尾竖线会产生一个空片段，那是「外框」不是单元格，必须丢掉；
+ *     但 `| a |  |` 中间那个空单元格要保留（它是真的第二列）
+ */
+function parseTableRow(text: string, lineFrom: number): TableRow {
+  const cells: TableCell[] = []
+  const n = text.length
+  let i = 0
+  // GFM 允许最多 3 个前导空格（再多就是代码块了）
+  while (i < n && (text[i] === ' ' || text[i] === '\t')) i++
+  if (text[i] === '|') i++ // 吃掉行首竖线
+
+  let buf = ''
+  let bufStart = i
+  // 把当前缓冲区落成一个单元格。from 指向去掉左侧空白后的第一个字符，
+  // 这样点击定位时光标落在内容上而不是空白处。
+  const flush = (): void => {
+    const trimmed = buf.trim()
+    const lead = buf.length - buf.trimStart().length
+    const from = lineFrom + bufStart + lead
+    cells.push({ text: trimmed, from, to: from + trimmed.length })
+    buf = ''
+  }
+
+  for (; i < n; i++) {
+    const ch = text[i]
+    if (ch === '\\' && text[i + 1] === '|') {
+      buf += '|'
+      i++
+      continue
+    }
+    if (ch === '|') {
+      flush()
+      bufStart = i + 1
+      continue
+    }
+    buf += ch
+  }
+  flush()
+
+  // 行尾竖线产生的空片段
+  if (cells.length > 1 && cells[cells.length - 1].text === '' && text[n - 1] === '|') {
+    cells.pop()
+  }
+  return { cells }
+}
+
+const DELIM_CELL_RE = /^:?-{1,}:?$/
+
+/** 分隔行：每个单元格都形如 `---` / `:--` / `--:` / `:-:`，且必须含竖线 */
+function parseDelimRow(row: TableRow): (Align | null)[] | null {
+  if (row.cells.length === 0) return null
+  const aligns: (Align | null)[] = []
+  for (const c of row.cells) {
+    const t = c.text.trim()
+    if (!DELIM_CELL_RE.test(t)) return null
+    const left = t.startsWith(':')
+    const right = t.endsWith(':')
+    aligns.push(left && right ? 'center' : right ? 'right' : left ? 'left' : null)
+  }
+  return aligns
+}
+
+/**
+ * 找出一个表格块；不是表格返回 null。
+ * startLine 传 1 起的行号，lineAt 传该行的 from。
+ */
+function parseTableBlock(
+  doc: EditorState['doc'],
+  startLine: number,
+  endLine: number,
+  lineFrom: number
+): TableBlock | null {
+  const headerText = doc.line(startLine).text
+  if (!headerText.includes('|')) return null
+  if (startLine + 1 > endLine) return null
+  const delimText = doc.line(startLine + 1).text
+  // 必须含竖线：`foo` + `---` 在 CommonMark 里是 setext 二级标题，不是表格
+  if (!delimText.includes('|')) return null
+
+  const header = parseTableRow(headerText, lineFrom)
+  const delimLine = startLine + 1
+  const delim = parseDelimRow(parseTableRow(delimText, doc.line(delimLine).from))
+  if (!delim) return null
+  // GFM：表头与分隔行的列数必须相等
+  if (delim.length !== header.cells.length) return null
+
+  // 向下收集数据行：空行或不含竖线的行即表格结束
+  const rows: TableRow[] = []
+  let last = delimLine
+  for (let n = delimLine + 1; n <= endLine; n++) {
+    const t = doc.line(n).text
+    if (!t.trim() || !t.includes('|')) break
+    rows.push(parseTableRow(t, doc.line(n).from))
+    last = n
+  }
+
+  return {
+    startLine,
+    delimLine,
+    endLine: last,
+    header,
+    rows,
+    aligns: delim,
+    // sig 只用于 Widget.eq（判断要不要重建 DOM）。用 JSON.stringify 天然带分隔符，
+    // 不必自己挑一个「保证不出现在正文里」的分隔字符（踩过 NUL 字节把源码变成二进制的坑）
+    sig: JSON.stringify([headerText, delimText, rows.map((r) => r.cells.map((c) => c.text))]),
+  }
+}
+
+/**
+ * 把一段 Markdown 行内文本渲染成 DOM 片段，复用装饰引擎同一批规则与优先级。
+ *
+ * ⚠️ 嵌套处理：`claimed` 去重是为了防止两条规则吃到同一段文本，但直接用它
+ * 会让**外层规则失效**。典型例子（用户报告里真实出现过）：
+ *
+ *     **无 `${}`**
+ *
+ * 行内代码规则先跑，吃掉了 `` `${}` `` 这段区间；随后粗体规则匹配到的区间
+ * 与它重叠 → 被跳过 → 星号原样显示出来。
+ *
+ * 正确做法是「命中内层规则后，把它的内容递归渲染成子节点，再交给外层规则包起来」，
+ * 于是 `**` 仍能被粗体规则识别，而其中的 `${}` 依旧是 <code>。
+ * claimed 只用于「同级不重复命中」，不再阻止父子嵌套。
+ */
+function renderInlineDOM(text: string): DocumentFragment {
+  const frag = document.createDocumentFragment()
+  // 只放「同一层」的命中区间：防止两条同级规则重复吃同一段
+  const claimed: [number, number][] = []
+  const pieces: { from: number; to: number; node: Node }[] = []
+
+  for (const rule of INLINE_RULES) {
+    if (!rule.dom) continue
+    rule.re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = rule.re.exec(text)) !== null) {
+      if (m[0].length === 0) {
+        rule.re.lastIndex++
+        continue
+      }
+      const from = m.index
+      const to = from + m[0].length
+      // 只拦「完全覆盖」的同级重复；部分重叠（嵌套）放行给递归处理
+      const covered = claimed.some(([a, b]) => from >= a && to <= b)
+      if (covered) continue
+      claimed.push([from, to])
+
+      const node = rule.dom(m)
+      // 行内代码 / 图片这类「叶子」内容原样放进 textContent；
+      // 其余规则（粗体/斜体/链接等）的 group(1) 是真正要递归的子内容
+      const innerIdx = rule.cls === 'cm-md-code' || rule.image ? -1 : 1
+      if (innerIdx > 0 && m[innerIdx] !== undefined && rule.cls !== 'cm-md-link') {
+        const inner = renderInlineDOM(m[innerIdx])
+        node.textContent = ''
+        node.appendChild(inner)
+      }
+      pieces.push({ from, to, node })
+    }
+  }
+
+  // ⚠️ 输出顺序必须是「**外层优先**」，不是单纯按 from 排序。
+  // 排序后逐段输出时，`**无 `${}`**` 里的 `**`（from 小）会先输出，
+  // 接着行内代码片段因 `p.from < pos` 被整段丢掉 —— 粗体里的代码就没了。
+  // 正确做法：含嵌套的外层片段自带完整子树（含内层），
+  // 因此输出时跳过「被已输出区间完全覆盖」的片段即可。
+  pieces.sort((a, b) => a.from - b.from || b.to - a.to)
+  let pos = 0
+  for (const p of pieces) {
+    // 被前面输出的区间完全覆盖 → 内容已在其子树里，跳过
+    if (p.from < pos) continue
+    frag.appendChild(document.createTextNode(text.slice(pos, p.from)))
+    frag.appendChild(p.node)
+    pos = p.to
+  }
+  frag.appendChild(document.createTextNode(text.slice(pos)))
+  return frag
+}
+
 // --- Widgets -------------------------------------------------------------
 
 class FenceLabel extends WidgetType {
@@ -353,69 +604,239 @@ class ImageWidget extends WidgetType {
   }
 }
 
+/**
+ * 整块表格 Widget。
+ *
+ * 交互：点击任意单元格 → 把光标 dispatch 到该单元格文本的源码位置，
+ * 表格随即回落成源码行（因为 cursorLine 落进块内）→ 用户可以正常改字。
+ * 光标离开表格后自动渲染回 <table>。
+ * 这是「所见即所得」与「可编辑」之间唯一自洽的衔接方式。
+ */
+class TableWidget extends WidgetType {
+  constructor(readonly block: TableBlock) {
+    super()
+  }
+  eq(other: TableWidget): boolean {
+    return other.block.sig === this.block.sig
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-table-wrap'
+
+    const table = document.createElement('table')
+    table.className = 'cm-md-table'
+
+    const thead = document.createElement('thead')
+    const htr = document.createElement('tr')
+    this.block.header.cells.forEach((c, i) => htr.appendChild(this.cell('th', c, i)))
+    thead.appendChild(htr)
+    table.appendChild(thead)
+
+    const tbody = document.createElement('tbody')
+    for (const row of this.block.rows) {
+      const tr = document.createElement('tr')
+      row.cells.forEach((c, i) => tr.appendChild(this.cell('td', c, i)))
+      tbody.appendChild(tr)
+    }
+    table.appendChild(tbody)
+    wrap.appendChild(table)
+
+    // 点哪格就把光标送到那格的源码位置。
+    // 两条约束，顺序也不能错：
+    //  1. 必须 preventDefault：否则 CodeMirror 会先处理这次点击，把光标放到
+    //     widget 覆盖区间的边界（表格第一行行首），而不是我们想去的单元格。
+    //  2. **必须先 focus 再 dispatch**：activeLine() 靠 view.hasFocus 判断
+    //     「光标行」，先 dispatch 的话编辑器还没聚焦 → cursorLine = -1
+    //     → 表格立刻又渲染回 <table>，看起来像点击没生效。
+    wrap.addEventListener('mousedown', (e) => {
+      const td = (e.target as HTMLElement | null)?.closest?.('[data-pos]') as HTMLElement | null
+      if (!td) return
+      const pos = Number(td.dataset.pos)
+      if (!Number.isFinite(pos)) return
+      e.preventDefault()
+      view.focus()
+      view.dispatch({ selection: { anchor: pos }, userEvent: 'select.pointer' })
+    })
+    return wrap
+  }
+  private cell(tag: 'th' | 'td', c: TableCell, col: number): HTMLElement {
+    const td = document.createElement(tag)
+    const align = this.block.aligns[col]
+    if (align) td.style.textAlign = align
+    // 点击定位到单元格文本末尾：光标在行尾时用户接着就能输入，
+    // 停在行首则要先按 End 键，不符合直觉
+    td.dataset.pos = String(Math.max(c.from, c.to > c.from ? c.to - 1 : c.to))
+    // 列数不足时补空格，避免 <td> 空着看起来像漏了内容
+    td.appendChild(renderInlineDOM(c.text || ' '))
+    return td
+  }
+  ignoreEvent(): boolean {
+    // 交给我们自己的 mousedown 处理（把光标送进源码），不走编辑器默认行为
+    return true
+  }
+}
+
 // --- 插件 ----------------------------------------------------------------
 
-function build(view: EditorView): DecorationSet {
-  const state = view.state
+/**
+ * 装饰集合用 **StateField** 而不是 ViewPlugin 提供。
+ *
+ * 原因：表格是整块替换（`block: true`），而 CodeMirror 明确禁止 ViewPlugin
+ * 产生块级装饰 —— 会在布局阶段抛
+ * `RangeError: Block decorations may not be specified via plugins`，
+ * 顺带把整个 DocView 打崩（后续报 measureVisibleLineHeights undefined）。
+ * 这个限制只在真正渲染时才暴露，`tsc` 和 `vite build` 都发现不了。
+ *
+ * StateField + EditorView.decorations 是官方唯一允许块级装饰的入口。
+ */
+
+/** 光标所在行（1 起），-1 表示整篇都不露标记。由 cursorSync 经 effect 写入 */
+let cursorLineProxy = -1
+
+function buildFrom(state: EditorState): DecorationSet {
   const out: Pending[] = []
   const ctx: Ctx = {
-    cursorLine: activeLine(view),
+    cursorLine: cursorLineProxy,
     out,
     claimed: [],
     inFence: false,
     fenceMarker: '',
   }
 
-  // 从第 1 行线性扫到需要处理的最后一行。
-  // 为什么不只扫 visibleRanges：代码围栏是跨行状态，只看可见段的话，
-  // 当围栏开头在视口上方时会把代码块内容当成普通段落解析（高亮与转义全乱）。
+  // 扫描范围是**整篇文档**，不用 visibleRanges。
   //
-  // 注意：ViewPlugin 构造阶段编辑器还没测量，visibleRanges 可能是空数组，
-  // 直接取 [length-1] 会抛 "Cannot read properties of undefined (reading 'to')"
-  // 并让整个插件崩掉（CodeMirror 只会打印一行 "plugin crashed"，极难定位）。
-  // 所以这里必须兜底成整篇文档。
-  const vr = view.visibleRanges
-  const endLine =
-    vr.length > 0
-      ? state.doc.lineAt(vr[vr.length - 1].to).number
-      : state.doc.lines
+  // 为什么不能用 visibleRanges：一旦某块被 block 替换，CodeMirror 会把这段
+  // 从 visibleRanges 里「挖掉」（实测渲染过表格后 visibleRanges 变成
+  // [[0,564],[1408,2739]] 这种两段不连续区间，表格所在区间正好不在里面）。
+  // 拿它当扫描依据 → 表格被自己的渲染结果挤出扫描范围 → 永远算不出源码态，
+  // 表现为「光标明明进了表格，表格还是 <table>」。
+  //
+  // 整篇扫描对大文档是否有性能问题：装饰重建只发生在 docChanged /
+  // selectionSet / viewportChanged / focusChanged，其中真正逐键输入的只有
+  // docChanged 与 selectionSet，而它们本来就要求全文重算（原实现也是线性扫到
+  // 可见区末尾）。这份报告 158 行、实测无卡顿；真要优化，正确方向是给
+  // TableBlock 加「文档版本号」做增量缓存，而不是缩小扫描范围。
+  const endLine = state.doc.lines
+
+  // 表格块缓存：同一行可能被多次询问，避免重复解析
+  const tableCache = new Map<number, TableBlock | null>()
+
   for (let n = 1; n <= endLine; n++) {
     const line = state.doc.line(n)
-    // 每行重置占用表：跨行的区间（围栏标签）不参与行内去重
     ctx.claimed = []
+
+    // --- 表格：整块识别，整块跳过 ---
+    if (!ctx.inFence) {
+      const cached = tableCache.get(n)
+      const block =
+        cached !== undefined ? cached : parseTableBlock(state.doc, n, endLine, line.from)
+      tableCache.set(n, block)
+
+      if (block) {
+        const cursorIn = ctx.cursorLine >= block.startLine && ctx.cursorLine <= block.endLine
+
+        if (cursorIn) {
+          // 光标在表内：整块回落源码，逐行只做行内解析，用户可正常改字
+          for (let k = block.startLine; k <= block.endLine; k++) {
+            const tl = state.doc.line(k)
+            ctx.claimed = []
+            if (k === block.delimLine) {
+              // 分隔行是纯语法，光标不在这一行时整行藏掉
+              addLine(ctx, tl.from, 'cm-md-tr-delim')
+              hide(ctx, k, tl.from, tl.to)
+            } else {
+              addLine(ctx, tl.from, k === block.startLine ? 'cm-md-tr cm-md-tr-head' : 'cm-md-tr')
+              processInline(ctx, tl.from, tl.text, k)
+            }
+          }
+        } else {
+          // 光标不在表内：整块换成 <table>
+          out.push({
+            from: state.doc.line(block.startLine).from,
+            to: state.doc.line(block.endLine).to,
+            deco: Decoration.replace({
+              widget: new TableWidget(block),
+              block: true,
+            }),
+          })
+        }
+        n = block.endLine
+        continue
+      }
+    }
+
     processLine(state, ctx, n, line.text, line.from)
   }
 
-  // 交给 Decoration.set 排序，规避 RangeSetBuilder 的顺序断言
   return Decoration.set(
     out.map((p) => p.deco.range(p.from, p.to)),
     true
   )
 }
 
-const livePreviewPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet
+/**
+ * 携带「光标行」的空文档 transaction。
+ *
+ * 为什么必须用 effect 显式传，而不是模块级变量：
+ * StateField 的 `create` 在插件构造之前就跑，此时 ViewPlugin 还没赋值，
+ * 模块级变量会是初始值 —— 装饰算两遍（第二遍才对）或者干脆算错。
+ * 走 transaction 则保证「算装饰时用的光标行」与「触发重算的光标行」同源。
+ */
+const setCursorLine = StateEffect.define<number>()
 
-    constructor(view: EditorView) {
-      this.decorations = build(view)
-    }
+const decoField = StateField.define<DecorationSet>({
+  create: (state) => buildFrom(state),
+  update(decos, tr) {
+    // 文档变了最重要：先按新文档重扫全文（光标行由 ViewPlugin 另行同步）
+    if (tr.docChanged) return buildFrom(tr.state)
 
-    update(u: ViewUpdate): void {
-      // 重算条件里**必须包含 focusChanged**：activeLine() 依赖 view.hasFocus，
-      // 点进文件树再点回编辑器，光标没动但「哪一行露标记」已经变了。
-      if (u.docChanged || u.selectionSet || u.viewportChanged || u.focusChanged) {
-        this.decorations = build(u.view)
+    let line = cursorLineProxy
+    let hasEffect = false
+    for (const e of tr.effects) {
+      if (e.is(setCursorLine)) {
+        line = e.value
+        hasEffect = true
       }
     }
+    // 没有任何需要重算的理由 → 复用旧装饰
+    // 注意：Transaction 上是 `selection`，ViewUpdate 上才是 `selectionSet`
+    if (!hasEffect && !tr.selection) return decos
+    cursorLineProxy = line
+    return buildFrom(tr.state)
   },
-  {
-    decorations: (v) => v.decorations,
+  provide: (f) => EditorView.decorations.from(f),
+})
+
+/**
+ * 光标行同步：只有 view 才知道 hasFocus，所以光标行由它算出后经 effect 传给 StateField。
+ *
+ * ⚠️ 这里用 **EditorView.updateListener** 而不是 ViewPlugin.fromClass(...).update，
+ * 是踩过坑才换的：ViewPlugin 的 update 只在「视图需要重绘」时触发，
+ * 而 `view.dispatch({ selection })` 这类纯选区变化不一定会走到它 ——
+ * 实测把光标在表格内外来回移动，ViewPlugin.update 的调用计数死死不动，
+ * 导致 cursorLineProxy 永远停在旧值，表现为「光标进了表格，表格死活不回落源码」，
+ * 且**没有任何报错**。updateListener 对每个 transaction 都会触发，是这里唯一可靠的钩子。
+ *
+ * 防循环只需一条铁律：**只在行号真的变化时才 dispatch**。
+ * 行号比较是纯函数判断，不依赖任何跨调用状态，最不容易出错。
+ * 代价是同一行内移动光标会多扫一遍全文，对本项目可接受。
+ */
+const cursorSync = EditorView.updateListener.of((u) => {
+  const line = activeLine(u.view)
+
+  // 文档变化由 decoField 自己处理；这里只同步光标行，
+  // 否则一次按键会触发两遍全文扫描
+  if (u.docChanged) {
+    cursorLineProxy = line
+    return
   }
-)
+  if (line === cursorLineProxy) return
+  cursorLineProxy = line
+  u.view.dispatch({ effects: setCursorLine.of(line) })
+})
 
 export function livePreview(): Extension {
-  return livePreviewPlugin
+  return [decoField, cursorSync]
 }
 
 // --- 供大纲跳转使用 ------------------------------------------------------

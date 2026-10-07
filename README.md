@@ -28,10 +28,20 @@ Kore 的目标是成为最好用的本地 Markdown 写作工具：启动快、�
 ## 特性
 
 - **所见即所得风格**：不分屏，左边写出来的**就是最终排版**。标题、加粗、列表、
-  引用、代码块、任务复选框、图片全部按渲染后的样式显示，但底层仍是纯 Markdown 源码。
+  引用、代码块、任务复选框、图片、**表格**全部按渲染后的样式显示，但底层仍是纯 Markdown 源码。
   把光标放到任意一行，那一行会临时显示原始语法（`#`、`**`、`- `），随时可改。
+  表格更进一步：光标不在表内时整块渲染成真表格，**点任意单元格即回到源码**编辑该格，
+  光标移开又自动渲染回去。
 - **不用先选工作区也能写**：直接「新建文档」或「打开」单个文件就能编辑，
   保存时再选择存到哪个路径。文件夹是可选的。
+- **只打开能正确显示的纯文本**：文件树默认**只列出受支持的类型**——
+  `.md` / `.markdown` / `.txt` / `.sql` / `.conf` / `.properties` / `.yaml` / `.json` 等。
+  遇到 `.class`、`.png` 这类不支持的类型，会直接提示「暂不支持打开 xxx」并说明支持哪些类型，
+  **不会报错、也不会显示乱码**。文件树底部可勾选「显示全部文件」，
+  不想隐藏的文件会以灰显列出（点它同样得到明确提示，而不是崩溃）。
+  非 Markdown 文件自动切到**纯文本模式**（等宽字体、不套 Markdown 装饰），
+  所以 `.sql` 里的 `--` 注释、`.yaml` 里的 `#` 注释都原样保留，不会被当成标题或强调标记吃掉。
+  Markdown 文件仍是所见即所得，两种模式在状态栏有类型标签区分。
 - **一级菜单**：`文件`（新建窗口 / 新建文档 / 打开 / 打开文件夹 / 保存 / 另存为 / 导出 PDF、HTML）
   与 `主题`（白色 / 黑色）。`Esc` 或点击菜单外收起。
 - **左侧栏可切换、可折叠**：`文件`（目录树）/ `大纲`（点击标题跳转）两个等宽页签，
@@ -108,7 +118,7 @@ kore/
 ├─ src/                  # React 前端
 │  ├─ assets/            # logo-mark / logo-wordmark（明暗两套，由 gen_logo.py 生成）
 │  ├─ components/        # MenuBar / Sidebar / FileTree / DocBar / Editor / ConfirmSwitch / Banner / StatusBar / Welcome
-│  ├─ lib/               # wysiwyg(所见即所得装饰引擎) / fs(双模桥) / markdown / outline / export / theme / slug / logo
+│  ├─ lib/               # wysiwyg(所见即所得装饰引擎) / fs(双模桥) / filetype(受支持类型白名单) / markdown / outline / export / theme / slug / logo
 │  ├─ workers/           # markdown.worker.ts（Worker 中解析 Markdown）
 │  ├─ state/             # Zustand store
 │  └─ styles/            # tokens.css(主题变量) / global.css

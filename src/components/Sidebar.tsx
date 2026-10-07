@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useStore } from '../state/store'
 import { extractOutline } from '../lib/outline'
+import { isMarkdownFile } from '../lib/filetype'
 import { FileTree } from './FileTree'
 
 // 左侧栏：顶部「文件 / 大纲」两个页签，内容区按页签切换。
@@ -42,6 +43,12 @@ function OutlineList() {
   const items = useMemo(() => extractOutline(tab?.content ?? ''), [tab?.content])
 
   if (!tab) return <div className="sidebar-empty">无标题</div>
+  // 大纲来自 Markdown 标题（`# xxx`）。对 .sql / .yaml 这类文件，
+  // `#` 是注释符不是标题，硬渲染出来会是一堆莫名其妙的条目，
+  // 不如直说「这份文档没有大纲」。
+  if (!isMarkdownFile(tab.path)) {
+    return <div className="sidebar-empty">仅 Markdown 文档支持大纲</div>
+  }
   if (items.length === 0) return <div className="sidebar-empty">无标题</div>
 
   return (

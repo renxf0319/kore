@@ -1,4 +1,5 @@
 import type { FileNode } from './types'
+import { isSupportedFile, SUPPORTED_EXTS, unsupportedMessage } from './filetype'
 
 // 双模文件系统桥：
 //  - Tauri 模式：通过 Rust 原生命令读写本地磁盘（window.__TAURI_INTERNALS__ 存在时）
@@ -101,12 +102,33 @@ async function browserList(path: string): Promise<FileNode[]> {
   return out
 }
 
+/**
+ * 严格按 UTF-8 解码。
+ *
+ * `File.text()` 用的是「宽松」解码：遇到非法字节序列不报错，
+ * 而是替换成 U+FFFD（�）。对 GBK 编码的中文 .txt / .sql 来说，
+ * 结果就是**满屏替换字符** —— 正是需求里要消灭的「乱码」。
+ *
+ * 这里改用 fatal 模式：解不出就明确抛错，由上层给出「编码不是 UTF-8」的提示，
+ * 让用户知道该先转存，而不是对着乱码猜。
+ */
+async function decodeUtf8(file: File, path: string): Promise<string> {
+  const buf = await file.arrayBuffer()
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf)
+  } catch {
+    throw new NotOpenableError(
+      `「${baseName(path)}」的编码不是 UTF-8（可能是 GBK 等其它编码），` +
+        `请先用文本编辑器转存为 UTF-8`
+    )
+  }
+}
+
 async function browserRead(path: string): Promise<string> {
   // 无工作区时（直接「打开」单个文件），走 looseFiles 句柄
   const loose = looseFiles.get(path)
   if (loose) {
-    const f = await loose.getFile()
-    return f.text()
+    return decodeUtf8(await loose.getFile(), path)
   }
   await ensurePerm()
   const root = rootHandle!
@@ -115,8 +137,7 @@ async function browserRead(path: string): Promise<string> {
   if (!fileName) throw new Error('无效的文件路径')
   const dir = await dirAt(root, parts)
   const fh = await dir.getFileHandle(fileName)
-  const file = await fh.getFile()
-  return file.text()
+  return decodeUtf8(await fh.getFile(), path)
 }
 
 async function writeLoose(h: FileSystemFileHandle, content: string): Promise<void> {
@@ -174,12 +195,21 @@ async function browserOpenFile(): Promise<OpenedFile | null> {
   }
   const [h] = await picker({
     multiple: false,
-    types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }],
+    types: [
+      {
+        description: 'Markdown / 纯文本 / SQL / 配置 / YAML',
+        accept: { 'text/plain': OPEN_EXTS },
+      },
+    ],
   })
   if (!h) return null
   const name = h.name
+  // 与桌面端同款闸门：picker 的 accept 只是「默认筛选」，
+  // 用户仍可在某些平台手动改过滤条件或输入别的文件名。
+  assertSupported(name)
+  // 严格 UTF-8：GBK 文本用 File.text() 会解出一屏 �
+  const content = await decodeUtf8(await h.getFile(), name)
   looseFiles.set(name, h)
-  const content = await (await h.getFile()).text()
   return { path: name, name, content }
 }
 
@@ -194,16 +224,27 @@ async function browserSaveAs(suggestedName: string): Promise<string | null> {
     throw new Error('当前浏览器不支持另存为（请用 Chrome / Edge 或桌面端）')
   }
   const h = await picker({
-    suggestedName: ensureMdExt(suggestedName),
-    types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }],
+    suggestedName: keepExt(suggestedName),
+    types: [
+      {
+        description: 'Markdown / 纯文本 / SQL / 配置 / YAML',
+        accept: { 'text/plain': OPEN_EXTS },
+      },
+    ],
   })
   const name = h.name
   looseFiles.set(name, h)
   return name
 }
 
-function ensureMdExt(name: string): string {
-  return /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`
+/**
+ * 另存为的建议文件名：**保留原有的受支持扩展名**。
+ * 之前是无条件改成 `.md`，于是「打开 a.sql → 另存为」会把文件类型悄悄换掉，
+ * 这在支持多类型之后是明确的 bug：用户以为存成了 .sql，实际拿到 .md。
+ * 没有受支持的扩展名时才回落 `.md`（新文档的默认）。
+ */
+function keepExt(name: string): string {
+  return isSupportedFile(name) ? name : `${name}.md`
 }
 
 /** Rust `FileEntry` 的原始形状：字段名是 snake_case */
@@ -213,6 +254,45 @@ interface RustFileEntry {
   is_dir?: boolean
   isDir?: boolean
 }
+
+/**
+ * 「这个文件打不开，但原因不是程序出错」专用错误。
+ *
+ * 覆盖两种情况：
+ *  - 类型不在白名单内（.class / .png / .jar）
+ *  - 类型合法但内容不是 UTF-8 文本（GBK 编码的 .txt、被改成 .txt 的 .exe）
+ *
+ * 单独一个类型而不是普通 Error，是为了在 store 里把它渲染成中性提示（info）
+ * 而不是红色报错条 —— 前者说的是「不在支持范围内」，后者说的是「程序坏了」，
+ * 后者对用户毫无帮助，还容易让人以为要重装。
+ */
+export class NotOpenableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NotOpenableError'
+  }
+}
+
+/** 类型闸门：读盘之前先问一次白名单 */
+function assertSupported(nameOrPath: string): void {
+  if (!isSupportedFile(nameOrPath)) throw new NotOpenableError(unsupportedMessage(nameOrPath))
+}
+
+/** 系统「打开文件」对话框的过滤器：一次列出全部受支持类型 */
+function openFilters() {
+  return [
+    { name: 'Markdown', extensions: ['md', 'markdown', 'mdown'] },
+    { name: '纯文本', extensions: ['txt', 'text', 'log'] },
+    { name: 'SQL', extensions: ['sql'] },
+    { name: '配置', extensions: ['conf', 'cfg', 'ini', 'properties'] },
+    { name: 'YAML', extensions: ['yaml', 'yml'] },
+    { name: 'JSON / XML / TOML', extensions: ['json', 'xml', 'toml'] },
+  ]
+}
+
+/** File System Access API 的 accept 只认 MIME → 扩展名，这里统一映射到 text/plain。
+ *  真实白名单仍由 filetype.ts 决定，这个数组只是给对话框做「默认筛选」用的。 */
+const OPEN_EXTS = SUPPORTED_EXTS.map((e) => `.${e}`)
 
 // ----------------------- Tauri 模式（Rust 原生命令） -----------------------
 async function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
@@ -228,11 +308,10 @@ async function tauriPick(): Promise<string | null> {
 
 async function tauriOpenFile(): Promise<OpenedFile | null> {
   const { open } = await import('@tauri-apps/plugin-dialog')
-  const r = await open({
-    multiple: false,
-    filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
-  })
+  const r = await open({ multiple: false, filters: openFilters() })
   if (typeof r !== 'string') return null
+  // 先判类型再读盘：对话框可以被改成「所有文件」，也可以手输文件名
+  assertSupported(r)
   const content = await tauriInvoke<string>('read_file', { path: r })
   return { path: r, name: baseName(r), content }
 }
@@ -240,8 +319,8 @@ async function tauriOpenFile(): Promise<OpenedFile | null> {
 async function tauriSaveAs(suggestedPath: string): Promise<string | null> {
   const { save } = await import('@tauri-apps/plugin-dialog')
   const r = await save({
-    defaultPath: ensureMdExt(suggestedPath),
-    filters: [{ name: 'Markdown', extensions: ['md'] }],
+    defaultPath: keepExt(suggestedPath),
+    filters: openFilters(),
   })
   return r ?? null
 }
@@ -289,6 +368,9 @@ export const fsApi = {
   },
 
   async readFile(path: string): Promise<string> {
+    // 兜底闸门：调用方（store）已经判过一次，但这是所有读盘的唯一出口，
+    // 在这里再挡一次才能保证「不支持的类型」永远不会走到解码那一步。
+    assertSupported(path)
     if (isTauri) return tauriInvoke<string>('read_file', { path })
     if (!rootHandle && !looseFiles.has(path)) throw new Error('未选择文件夹或文件')
     return browserRead(path)

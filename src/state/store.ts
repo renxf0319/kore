@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { OpenTab, SidePane, ThemeMode } from '../lib/types'
-import { fsApi, isTauri } from '../lib/fs'
+import { fsApi, isTauri, NotOpenableError } from '../lib/fs'
 import { applyTheme, getStoredTheme } from '../lib/theme'
+import { isSupportedFile, unsupportedMessage } from '../lib/filetype'
 
 // 用户可见的提示（取代从前"点什么都没反应"的静默失败）
 export interface Notice {
@@ -84,6 +85,8 @@ interface AppState {
   rootName: string | null
   expanded: Record<string, boolean>
   dirs: Record<string, { name: string; path: string; isDir: boolean }[]>
+  /** 是否显示白名单之外的其它文件（默认 false：只列出可编辑的纯文本类型） */
+  showAllFiles: boolean
   tabs: OpenTab[]
   /** 当前激活标签的 id（不是 path —— 未命名文档没有 path） */
   active: string | null
@@ -107,6 +110,7 @@ interface AppState {
   setSidebar: (open: boolean) => void
   setSidebarW: (w: number) => void
   setJumpLine: (n: number | null) => void
+  setShowAllFiles: (v: boolean) => void
 
   newDoc: () => void
   openFileDialog: () => Promise<void>
@@ -142,6 +146,17 @@ const SIDEBAR_W_MIN = 140
 const SIDEBAR_W_MAX = 520
 const SIDEBAR_W_DEFAULT = 196
 const SIDEBAR_W_KEY = 'kore-sidebar-w'
+
+/** 「显示全部文件」开关的持久化 key */
+const SHOW_ALL_KEY = 'kore-show-all-files'
+
+function readShowAll(): boolean {
+  try {
+    return localStorage.getItem(SHOW_ALL_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 function clampSidebarW(w: number): number {
   return Math.round(Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, w)))
@@ -189,6 +204,7 @@ export const useStore = create<AppState>((set, get) => ({
   rootName: null,
   expanded: {},
   dirs: {},
+  showAllFiles: readShowAll(),
   tabs: [],
   active: null,
   ready: false,
@@ -306,6 +322,19 @@ export const useStore = create<AppState>((set, get) => ({
     set({ jumpLine: n })
   },
 
+  setShowAllFiles(v) {
+    set({ showAllFiles: v })
+    try {
+      localStorage.setItem(SHOW_ALL_KEY, v ? '1' : '0')
+    } catch {
+      /* 存不上不影响本次会话使用 */
+    }
+    // dirs 里缓存的是过滤后的结果，切换后必须重读，否则开关看起来「没反应」。
+    // 只重读已经加载过的目录（值可能为 null 表示正在加载，跳过避免并发覆盖）。
+    const loaded = Object.keys(get().dirs).filter((p) => get().dirs[p] !== undefined)
+    for (const p of loaded) void get().loadDir(p)
+  },
+
   // --- 未保存拦截 -----------------------------------------------------------
   // 所有会「丢弃当前文档」的动作（新建/打开/关闭）都先过这里。
   // 有未保存改动时把动作挂起，交给对话框的「保存 / 放弃 / 取消」决定。
@@ -347,10 +376,23 @@ export const useStore = create<AppState>((set, get) => ({
       f = await fsApi.openFile()
     } catch (e) {
       if (isAbort(e)) return
+      // 「打不开但不是程序坏了」不是故障：用中性提示，
+      // 红色报错会让人以为程序出错，而用户其实只需要知道下一步该做什么
+      if (e instanceof NotOpenableError) {
+        set({ notice: { kind: 'info', text: e.message } })
+        return
+      }
       set({ notice: { kind: 'error', text: `打开文件失败：${errText(e)}` } })
       return
     }
     if (!f) return
+    // 与文件树入口同款闸门：系统对话框可能被用户切成「所有文件」，
+    // 或者在「文件名」框里手输一个 .pdf。这里再挡一次，
+    // 保证「不支持的类型」永远是提示，而不是读盘失败或乱码。
+    if (!isSupportedFile(f.name)) {
+      set({ notice: { kind: 'info', text: unsupportedMessage(f.name) } })
+      return
+    }
     get().guard(async () => {
       set(single({ id: `file-${f.path}`, path: f.path, name: f.name, content: f.content, savedContent: f.content, dirty: false }))
       // 桌面端把工作区切到该文件所在目录，侧栏文件树跟着走
@@ -374,7 +416,14 @@ export const useStore = create<AppState>((set, get) => ({
   async loadDir(path) {
     try {
       const list = await fsApi.listDir(path)
-      set((s) => ({ dirs: { ...s.dirs, [path]: list }, expanded: { ...s.expanded, [path]: true } }))
+      // 只展示受支持的纯文本类型（目录始终保留，否则无法进入子目录）。
+      // 关掉「显示全部文件」时，白名单外的条目直接不出现在树里 ——
+      // 让用户点到一个 .class / .png 只会得到一句「不支持」，不如根本不列。
+      const showAll = get().showAllFiles
+      const visible = showAll
+        ? list
+        : list.filter((n) => n.isDir || isSupportedFile(n.name))
+      set((s) => ({ dirs: { ...s.dirs, [path]: visible }, expanded: { ...s.expanded, [path]: true } }))
     } catch (e) {
       const msg = errText(e)
       if (fsApi.hasRestoredHandle() && /user gesture|权限|Permission/i.test(msg)) {
@@ -400,6 +449,13 @@ export const useStore = create<AppState>((set, get) => ({
   async openFile(path, name) {
     // 点当前正打开的同一文件：什么都不用做，更不该弹未保存提示
     if (get().activeTab()?.path === path) return
+    // 类型闸门放在**读盘之前**：白名单外的文件不进入 read_file。
+    // 否则 .class / .png 会被当 UTF-8 解，要么报「流中没有有效 UTF-8」这种
+    // 让人一头雾水的底层错误，要么在某些环境下解出一屏乱码。
+    if (!isSupportedFile(name)) {
+      set({ notice: { kind: 'info', text: unsupportedMessage(name) } })
+      return
+    }
     let content: string
     try {
       content = await fsApi.readFile(path)
@@ -411,7 +467,21 @@ export const useStore = create<AppState>((set, get) => ({
         set({ notice: { kind: 'info', text: `「${name}」是文件夹，请点击左侧箭头展开` } })
         return
       }
-      set({ notice: { kind: 'error', text: `打开「${name}」失败：${errText(e)}` } })
+      // 打不开但不是程序坏了（编码不是 UTF-8 等）：中性提示即可，
+      // 文案本身已经说明了该做什么，不需要再套一层「打开失败：」
+      if (e instanceof NotOpenableError) {
+        set({ notice: { kind: 'info', text: e.message } })
+        return
+      }
+      // Rust 侧（桌面端）用 Err(String) 返回，拿不到错误类型。
+      // 它的编码提示已自带「无法打开…请转存为 UTF-8」，
+      // 这里按文案特征识别，避免又被套上「打开失败：」前缀变成红色报错。
+      const raw = errText(e)
+      if (/转存为 UTF-8|不是 UTF-8/.test(raw)) {
+        set({ notice: { kind: 'info', text: raw } })
+        return
+      }
+      set({ notice: { kind: 'error', text: `打开「${name}」失败：${raw}` } })
       return
     }
     get().guard(() => {

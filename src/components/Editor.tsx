@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { EditorState, Compartment } from '@codemirror/state'
+import { EditorState, Compartment, type Extension } from '@codemirror/state'
 import {
   EditorView,
   keymap,
@@ -29,6 +29,7 @@ import {
 import { useStore } from '../state/store'
 import { livePreview, lineToPos } from '../lib/wysiwyg'
 import { fenceLangCompletion } from '../lib/fenceLang'
+import { isMarkdownFile } from '../lib/filetype'
 
 /**
  * 覆盖 defaultHighlightStyle 里「标题带下划线」的规则。
@@ -49,6 +50,19 @@ const koreHighlightStyle = HighlightStyle.define([
 
 const themeCompartment = new Compartment()
 
+/**
+ * 按文件类型选择编辑模式。
+ *
+ * Markdown（.md/.markdown/.mdown 与未命名新文档）走 WYSIWYG：装饰引擎隐藏语法标记。
+ * 其它纯文本类型（.sql/.yaml/.conf/.properties/.txt…）**必须**走 plain：
+ * 若给它们套上 Markdown 规则，`# comment` 整行会被当标题隐藏、`*`、`_`、`- `
+ * 会被当强调/列表标记吃掉 —— 用户看到的就不是原文，而是「乱码」。
+ */
+function langExtension(nameOrPath: string | null): Extension {
+  if (!isMarkdownFile(nameOrPath)) return []
+  return [markdown(), livePreview()]
+}
+
 export default function Editor() {
   const host = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -66,6 +80,12 @@ export default function Editor() {
     const tab = useStore.getState().tabs.find((t) => t.id === active)
     const doc = tab?.content ?? ''
     const id = active
+    // 未命名文档（path 为 null）按 Markdown 处理
+    const mdMode = isMarkdownFile(tab?.path ?? null)
+    const asMarkdown = langExtension(tab?.path ?? null)
+    // 纯文本模式换等宽字体：SQL / YAML / properties 都靠缩进与对齐表达结构，
+    // 用正文字体渲染会让层次全糊在一起。
+    const contentClass = mdMode ? 'cm-typora-content' : 'cm-plain-content'
 
     const state = EditorState.create({
       doc,
@@ -77,18 +97,23 @@ export default function Editor() {
         rectangularSelection(),
         crosshairCursor(),
         highlightSelectionMatches(),
-        markdown(),
+        // Markdown 解析 / WYSIWYG 装饰，或纯文本模式（二选一）
+        asMarkdown,
         syntaxHighlighting(koreHighlightStyle, { fallback: true }),
         // 输入 ``` 后提示语言标识符（认不全也能选）
         closeBrackets(),
-        autocompletion({
-          override: [fenceLangCompletion],
-          activateOnTyping: true,
-          // 行内已经有完整单词（如写了 `java` 之外的正文）时不打扰
-          defaultKeymap: true,
-        }),
-        // 语法标记由装饰引擎隐藏，编辑器本体保持纯 Markdown
-        livePreview(),
+        // 纯文本模式下不装围栏补全：`.sql` 里的 ``` 只是普通字符，
+        // 弹候选框反而是干扰
+        ...(mdMode
+          ? [
+              autocompletion({
+                override: [fenceLangCompletion],
+                activateOnTyping: true,
+                // 行内已经有完整单词（如写了 `java` 之外的正文）时不打扰
+                defaultKeymap: true,
+              }),
+            ]
+          : []),
         themeCompartment.of(theme === 'dark' ? oneDark : []),
         keymap.of([
           ...closeBracketsKeymap,
@@ -106,7 +131,7 @@ export default function Editor() {
         }),
         EditorView.lineWrapping,
         // 编辑区在 Typora 里是居中的窄栏，两侧留白
-        EditorView.contentAttributes.of({ class: 'cm-typora-content' }),
+        EditorView.contentAttributes.of({ class: contentClass }),
       ],
     })
 

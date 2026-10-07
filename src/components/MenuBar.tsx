@@ -210,7 +210,7 @@ function useFileItems(): Item[] {
         const name = await exportHtml(t.path ?? t.name, t.content, theme)
         setNotice({ kind: 'info', text: `已导出 ${name}` })
       } else {
-        await exportPdf(t.content, theme)
+        await exportPdf(t.path ?? t.name, t.content, theme)
       }
     } catch (e) {
       setNotice({

@@ -1,5 +1,6 @@
 import { fsApi, isTauri } from './fs'
 import { renderMarkdown } from './markdown'
+import { isMarkdownFile } from './filetype'
 import DOMPurify from 'dompurify'
 import type { ThemeMode } from './types'
 
@@ -10,16 +11,34 @@ async function renderSafe(src: string): Promise<string> {
   return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
 }
 
+/**
+ * 非 Markdown 文件（.sql / .yaml / .conf …）**不能**过 markdown-it。
+ * 一段 SQL 里的 `#`、`*`、`_` 会被解析成标题 / 强调，导出的 HTML 就不是原文了。
+ * 这类文件按纯文本导出：转义后塞进 <pre>，所见即所得。
+ */
+function renderAsPre(src: string): string {
+  const esc = src
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  return `<pre>${esc}</pre>`
+}
+
+async function renderForExport(sourceName: string, src: string): Promise<string> {
+  if (!isMarkdownFile(sourceName)) return renderAsPre(src)
+  return renderSafe(src)
+}
+
 // 导出独立 HTML：桌面端写到源文件同级目录，浏览器端走下载
 export async function exportHtml(
   sourceName: string,
   source: string,
   theme: ThemeMode
 ): Promise<string> {
-  const html = await renderSafe(source)
+  const html = await renderForExport(sourceName, source)
   const doc = buildHtmlDoc(html, theme)
   if (isTauri && sourceName.includes('\\')) {
-    const out = sourceName.replace(/\.md$/i, '') + '.html'
+    const out = sourceName.replace(/\.[^.]+$/, '') + '.html'
     await fsApi.writeFile(out, doc)
     return out
   }
@@ -30,10 +49,11 @@ export async function exportHtml(
 
 // 导出 PDF：先把渲染结果塞进隐藏的 print-root，再调系统打印对话框「另存为 PDF」
 export async function exportPdf(
+  sourceName: string,
   source: string,
   theme: ThemeMode
 ): Promise<void> {
-  const html = await renderSafe(source)
+  const html = await renderForExport(sourceName, source)
   injectPrintDoc(html, theme)
   // 等一帧，确保浏览器已经完成布局再进打印
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
@@ -84,7 +104,7 @@ ${html}
 
 function outName(p: string): string {
   const base = p.split(/[\\/]/).pop() || 'document.md'
-  return base.replace(/\.(md|markdown|txt)$/i, '') + '.html'
+  return base.replace(/\.[^.]+$/, '') + '.html'
 }
 
 function download(name: string, content: string, mime: string): void {

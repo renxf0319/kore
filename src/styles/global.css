@@ -387,6 +387,42 @@ body.resizing-col * {
   font-weight: 600;
 }
 
+/* 「显示全部文件」开关：贴在文件树底部，默认状态低调、不与文件名抢视线。
+   勾选框保留原生 appearance —— 系统自绘的勾选框在各平台观感最自然，
+   强行自定义反而容易在暗色下糊成一片。 */
+.tree-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 5px 6px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.tree-toggle:hover {
+  color: var(--fg);
+}
+.tree-toggle input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+/* 白名单之外的文件：可见但明确「不可用」。
+   不用 display:none —— 用户需要知道文件存在，点一下得到明确提示，
+   比「文件凭空消失」更好排查。 */
+.tree-row.file.unsupported {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.tree-row.file.unsupported:hover {
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+}
+
 /* ---------------- 编辑区 ---------------- */
 .editor-host {
   flex: 1;
@@ -420,6 +456,19 @@ body.resizing-col * {
 }
 .editor-host .cm-line {
   padding: 0;
+}
+
+/* 纯文本模式（.sql / .yaml / .conf / .properties / .txt 等）
+   与 Markdown 的排版刻意分开：等宽字体、较紧的行高、无首行缩进。
+   这些格式靠空格对齐表达结构，用正文字体 + 1.8 行高会把层次拉散。 */
+.editor-host .cm-scroller:has(.cm-plain-content) {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  line-height: 1.6;
+  font-size: 14px;
+}
+.editor-host .cm-plain-content {
+  padding: 0 48px 0 96px;
+  caret-color: var(--accent);
 }
 
 /* Markdown 语义样式
@@ -508,6 +557,65 @@ body.resizing-col * {
   height: 14px;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+/* ---------------- 表格 ----------------
+   整块表格由 Decoration.replace 换成一个真 <table>（见 lib/wysiwyg.ts 的 TableWidget），
+   所以这里的样式同时要满足两个场景：
+     1. Widget 渲染态 —— .cm-md-table-wrap > table.cm-md-table
+     2. 光标进表后的源码回落态 —— .cm-md-tr（此时只剩竖线文本，靠行样式提示「这是一张表」）
+   ⚠️ 沿用上文那条约束：选择器必须同为「后代 + 单类」权重（0,2,0），
+   否则会被 .cm-gutters/.cm-line 的 padding 规则整条盖掉。 */
+.editor-host .cm-md-table-wrap {
+  margin: 0.6em 0;
+  /* 表格可能比正文窄栏宽，给一层横向滚动，别把整行撑破布局 */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.editor-host .cm-md-table {
+  border-collapse: collapse;
+  /* width:auto 而非 100%：窄表格就窄着，和 Typora 一致，不强行拉满 */
+  max-width: 100%;
+  margin: 0;
+  font-size: 0.95em;
+  line-height: 1.6;
+}
+.editor-host .cm-md-table th,
+.editor-host .cm-md-table td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  /* 单元格内容长短不一时，窄列里的长路径/长串要能断行，否则会把表格撑得很宽 */
+  word-break: break-word;
+  vertical-align: top;
+  text-align: left;
+}
+.editor-host .cm-md-table th {
+  background: var(--bg-elev);
+  color: var(--heading-fg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* 斑马纹：宽表横向扫行时能对上列。浅到不干扰阅读 */
+.editor-host .cm-md-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+}
+/* 单元格内的行内标记：沿用全局样式，但去掉行内代码的行内 padding 会显得挤 */
+.editor-host .cm-md-table .cm-md-code {
+  padding: 1px 4px;
+}
+
+/* --- 源码回落态：光标进入表格后，逐行显示原始竖线 --- */
+.editor-host .cm-md-tr {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.9em;
+}
+.editor-host .cm-md-tr-head {
+  font-weight: 700;
+  color: var(--heading-fg);
+}
+/* 分隔行是纯语法：整行藏起来（hide 装饰已把它 replace 掉，这里只留个最小高度占位） */
+.editor-host .cm-md-tr-delim {
+  font-size: 0.9em;
 }
 
 .editor-host .cm-md-hr {
@@ -762,6 +870,12 @@ body.resizing-col * {
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 类型标签：让用户一眼看出当前是「所见即所得的 Markdown」还是「原样纯文本」。
+   这两种模式渲染结果差别很大，必须显式告知，不能靠用户自己撞出来。 */
+.sb-kind {
+  color: var(--accent);
   white-space: nowrap;
 }
 

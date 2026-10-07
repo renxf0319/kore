@@ -54,15 +54,64 @@ pub fn read_dir(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 /// 读取文本文件
+///
+/// 只放行受支持的纯文本扩展名，且必须是合法 UTF-8。
+/// 两条都是前端体验的硬要求：
+///  - 白名单外的文件（.class / .png / .jar）如果硬读，
+///    `read_to_string` 要么报「stream did not contain valid UTF-8」这种
+///    用户看不懂的底层错误，要么在别的平台上解出一屏乱码。
+///  - 扩展名是白名单内但内容是二进制（有人把 .txt 改成 .exe）时，
+///    同样会走到上面那条路。所以在**读完之后**再补一道 UTF-8 校验。
+///
+/// ⚠️ `SUPPORTED_EXTS` 必须与前端 `src/lib/filetype.ts` 的白名单保持一致。
+/// 前端已经拦过一次，这里是防止绕过前端直接调 command 的第二道闸。
+const SUPPORTED_EXTS: &[&str] = &[
+    "md", "markdown", "mdown", "txt", "text", "log", "sql", "conf", "cfg", "ini", "properties",
+    "yaml", "yml", "json", "toml", "xml",
+];
+
+fn is_supported_ext(path: &Path) -> bool {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .map(|e| SUPPORTED_EXTS.contains(&e.as_str()))
+        .unwrap_or(false)
+}
+
+fn ext_of(path: &Path) -> String {
+    path.extension()
+        .map(|e| format!(".{}", e.to_string_lossy().to_ascii_lowercase()))
+        .unwrap_or_else(|| "无扩展名".to_string())
+}
+
 #[tauri::command]
 pub fn read_file(path: String) -> Result<String, String> {
+    let p = Path::new(&path);
     // 先判目录：对目录调 read_to_string 在 Windows 上只会得到
     // os error 5「拒绝访问」，用户完全看不出真实原因（他其实点错了文件夹）。
     // 这里显式拦下来并给出可读提示，前端据此把提示换成「请点击左侧箭头展开」。
-    if Path::new(&path).is_dir() {
+    if p.is_dir() {
         return Err(format!("这是一个文件夹，不是文件: {}", path));
     }
-    fs::read_to_string(&path).map_err(|e| format!("读取失败 {}: {}", path, e))
+    if !is_supported_ext(p) {
+        return Err(format!(
+            "暂不支持打开「{}」（{}）。仅支持纯文本类型：.md / .txt / .sql / .conf / .properties / .yaml",
+            p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone()),
+            ext_of(p)
+        ));
+    }
+    // 扩展名合法，但内容未必是文本：UTF-8 校验失败就明确说「不是文本文件」，
+    // 而不是把底层错误抛给前端。
+    match fs::read(p) {
+        Ok(bytes) => String::from_utf8(bytes).map_err(|e| {
+            let kind = if e.utf8_error().valid_up_to() == 0 {
+                "看起来是二进制文件"
+            } else {
+                "编码不是 UTF-8（可能是 GBK 等其它编码）"
+            };
+            format!("无法打开「{}」：{}，请先用文本编辑器转存为 UTF-8", path, kind)
+        }),
+        Err(e) => Err(format!("读取失败 {}: {}", path, e)),
+    }
 }
 
 /// 写入文本文件（覆盖）

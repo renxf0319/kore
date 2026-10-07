@@ -1,4 +1,5 @@
 import { useStore } from '../state/store'
+import { kindLabel } from '../lib/filetype'
 
 export default function StatusBar() {
   const active = useStore((s) => s.active)
@@ -10,10 +11,18 @@ export default function StatusBar() {
   const words = (text.match(/[A-Za-z0-9_一-鿿]+/g) || []).length
   const chars = text.length
   const lines = text ? text.split('\n').length : 0
+  // 未命名文档没有扩展名，不显示类型标签（默认就是 Markdown）
+  const kind = tab?.path ? kindLabel(tab.path) : null
 
   return (
     <footer className="statusbar no-print">
       <span className="sb-file">{tab?.name ?? '无文档'}</span>
+      {kind && (
+        <>
+          <span className="dot" />
+          <span className="sb-kind">{kind}</span>
+        </>
+      )}
       <span className="dot" />
       <span>{words} 词</span>
       <span>{chars} 字</span>
