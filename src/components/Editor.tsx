@@ -16,11 +16,29 @@ import {
   indentWithTab,
 } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
-import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
+import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
+import { tags } from '@lezer/highlight'
 import { useStore } from '../state/store'
 import { livePreview, lineToPos } from '../lib/wysiwyg'
+
+/**
+ * 覆盖 defaultHighlightStyle 里「标题带下划线」的规则。
+ *
+ * 根因：@codemirror/language 的 defaultHighlightStyle 给 tags.heading 设了
+ * `textDecoration: "underline"`（源码 index.js 里明写着），而 Markdown 解析器
+ * 会给标题打上 tags.heading —— 于是每个标题文字下方都有一条下划线。
+ * 它不是我们 CSS 写的，所以改 global.css 没用，必须在 highlight 层覆盖。
+ *
+ * ⚠️ 顺序很关键：HighlightStyle.define 里**后写的规则覆盖先写的**，
+ * 所以覆盖项必须放在 defaultHighlightStyle.specs **之后**，
+ * 放前面会被后面的默认 heading 规则压回去（下划线又回来）。
+ */
+const koreHighlightStyle = HighlightStyle.define([
+  ...defaultHighlightStyle.specs,
+  { tag: tags.heading, textDecoration: "none", fontWeight: "bold" },
+])
 
 const themeCompartment = new Compartment()
 
@@ -53,7 +71,7 @@ export default function Editor() {
         crosshairCursor(),
         highlightSelectionMatches(),
         markdown(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(koreHighlightStyle, { fallback: true }),
         // Typora 风格：语法标记由装饰引擎隐藏，编辑器本体保持纯 Markdown
         livePreview(),
         themeCompartment.of(theme === 'dark' ? oneDark : []),

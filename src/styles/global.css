@@ -439,17 +439,18 @@ body.resizing-col * {
   line-height: 1.4;
   color: var(--heading-fg);
 }
+/* 标题**不要**下划线/分隔线 —— 那是 GitHub 风格，Typora 的标题是干净的。
+   早期版本给 h1/h2 加过 border-bottom（GitHub 的 setext 风格横线），
+   已移除，标题只靠字号和字重区分层级。 */
 .editor-host .cm-md-h1 {
   font-size: 1.9em;
   padding-top: 0.6em;
   padding-bottom: 0.2em;
-  border-bottom: 1px solid var(--border);
 }
 .editor-host .cm-md-h2 {
   font-size: 1.5em;
   padding-top: 0.5em;
   padding-bottom: 0.15em;
-  border-bottom: 1px solid var(--border);
 }
 .editor-host .cm-md-h3 {
   font-size: 1.25em;
