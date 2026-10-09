@@ -9,7 +9,7 @@ export interface Notice {
   kind: 'info' | 'error'
   text: string
   // 需要用户手势才能完成的动作，交给界面渲染成按钮
-  action?: 'regrant'
+  action?: 'regrant' | 'release'
 }
 
 function errText(e: unknown): string {

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { exportHtml, exportPdf } from '../lib/export'
 import { newWindow, shortcutOf } from '../lib/commands'
+import { checkUpdate, openExternal, RELEASES_PAGE } from '../lib/updater'
 
-type MenuKey = 'file' | 'theme' | null
+type MenuKey = 'file' | 'theme' | 'about' | null
 
 interface Item {
   label?: string
@@ -12,17 +13,19 @@ interface Item {
   checked?: boolean
   danger?: boolean
   sep?: boolean
+  /** 灰显不可点（纯信息展示，如版本号）。仍会占位，保证对齐 */
+  disabled?: boolean
   /** 关联 commands.ts 里的命令 id；用于自动渲染右侧快捷键提示 */
   cmdId?: string
 }
 
-// Typora 式顶栏：文件 / 主题。点击展开，点击外部或 Esc 收起。
+// Typora 式顶栏：文件 / 主题 / 关于。点击展开，点击外部或 Esc 收起。
 export default function MenuBar() {
   const [open, setOpen] = useState<MenuKey>(null)
   const barRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Alt+F / Alt+T 直接展开对应菜单；Esc 收起。
+    // Alt+F / Alt+T / Alt+A 直接展开对应菜单；Esc 收起。
     // 即便菜单当前是关着的也要监听，所以这个 effect 不依赖 open。
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -37,11 +40,15 @@ export default function MenuBar() {
       } else if (k === 't') {
         e.preventDefault()
         setOpen('theme')
+      } else if (k === 'a') {
+        e.preventDefault()
+        setOpen('about')
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])
+
 
   useEffect(() => {
     if (!open) return
@@ -80,6 +87,14 @@ export default function MenuBar() {
           onToggle={() => setOpen(open === 'theme' ? null : 'theme')}
         >
           <ThemeItems onPick={run} />
+        </Menu>
+        <Menu
+          label="关于"
+          accelKey="A"
+          active={open === 'about'}
+          onToggle={() => setOpen(open === 'about' ? null : 'about')}
+        >
+          <AboutItems onPick={run} />
         </Menu>
       </div>
     </div>
@@ -132,9 +147,15 @@ function Items({ items, onPick }: { items: Item[]; onPick: (fn?: () => void) => 
         ) : (
           <button
             key={i}
-            className={`menu-item${it.checked ? ' checked' : ''}`}
+            className={`menu-item${it.checked ? ' checked' : ''}${it.disabled ? ' disabled' : ''}`}
             role="menuitem"
-            onClick={() => onPick(it.onSelect)}
+            // disabled 用 aria 而不是原生 disabled：原生 disabled 会让菜单项
+            // 从 tab 序列里消失，键盘用户就再也看不到版本号这一行了
+            aria-disabled={it.disabled || undefined}
+            onClick={() => {
+              if (it.disabled) return
+              onPick(it.onSelect)
+            }}
           >
             <span className="menu-check">{it.checked ? '✓' : ''}</span>
             <span>{it.label}</span>
@@ -186,6 +207,63 @@ function ThemeItems({ onPick }: { onPick: (fn?: () => void) => void }) {
     { label: '黑色', checked: theme === 'dark', onSelect: () => setTheme('dark') },
   ]
   return <Items items={items} onPick={onPick} />
+}
+
+/**
+ * 「关于」菜单：版本信息 + 检查更新。
+ *
+ * 检查更新的三条原则：
+ *  1. **立刻给反馈**：点下去马上出「正在检查…」，否则用户分不清是网络慢还是没点上。
+ *  2. **结果落到提示条**：复用 store.notice（顶部 Banner），而不是菜单里再开一层浮窗 ——
+ *     菜单会在 run() 里关闭，任何写在菜单内部的提示都会跟着消失。
+ *  3. **发现新版本要能一键跳下载页**：提示条带 action 按钮，见 Banner.tsx。
+ */
+function AboutItems({ onPick }: { onPick: (fn?: () => void) => void }) {
+  const setNotice = useStore((s) => s.setNotice)
+  const mode = useStore((s) => s.mode)
+
+  const items: Item[] = [
+    { label: `Kore ${__APP_VERSION__}`, disabled: true },
+    {
+      label: `运行环境：${mode === 'tauri' ? '桌面版' : mode === 'browser' ? '浏览器' : '未知'}`,
+      disabled: true,
+    },
+    { sep: true },
+    { label: '检查更新…', onSelect: () => void doCheck(setNotice) },
+    { label: '前往下载页', onSelect: () => openExternal(RELEASES_PAGE) },
+    { sep: true },
+    { label: '项目主页', onSelect: () => openExternal(__REPO_URL__) },
+  ]
+  return <Items items={items} onPick={onPick} />
+}
+
+async function doCheck(
+  setNotice: (n: { kind: 'info' | 'error'; text: string; action?: 'release' }) => void
+): Promise<void> {
+  setNotice({ kind: 'info', text: '正在检查更新…' })
+  try {
+    const { current, latest, hasUpdate, noRelease } = await checkUpdate()
+    if (hasUpdate) {
+      setNotice({
+        kind: 'info',
+        text: `发现新版本 ${latest}（当前 ${current}）`,
+        action: 'release',
+      })
+      return
+    }
+    setNotice({
+      kind: 'info',
+      text: noRelease
+        ? `当前版本 ${current}（仓库尚未发布正式版本，暂无可比对的新版本）`
+        : `已是最新版本 ${current}`,
+    })
+  } catch (e) {
+    // 网络类问题不该报红：用户没做错任何事，红色会让人以为程序出错
+    setNotice({
+      kind: 'info',
+      text: `检查更新失败：${e instanceof Error ? e.message : String(e)}`,
+    })
+  }
 }
 
 function useFileItems(): Item[] {

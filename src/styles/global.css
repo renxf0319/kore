@@ -105,6 +105,16 @@ button {
   background: var(--accent-soft);
   color: var(--accent);
 }
+/* 禁用态（版本号等纯信息）：灰字、不可点。
+   仍保留 hover 不变色，这样用户能看出「这是一行信息」而非「点了没反应」。 */
+.menu-item.disabled {
+  color: var(--fg-muted);
+  cursor: default;
+}
+.menu-item.disabled:hover {
+  background: transparent;
+  color: var(--fg-muted);
+}
 .menu-check {
   width: 16px;
   flex-shrink: 0;
@@ -256,16 +266,27 @@ body.resizing-col * {
 .sidebar-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  /* ⚠️ 这里**不能**再 overflow:auto。
+     滚动一旦发生在这一层，底部的「显示全部文件」开关就会被文件树顶出视口。
+     滚动改由内部的 .tree-scroll / .outline 各自负责（见下），
+     这样开关才能真正钉在底部不随内容滚动。 */
+  overflow: hidden;
   /* 改成 flex 纵向容器：里面的 .sidebar-empty 才能用 flex:1 占满剩余高度，
      从而真正上下居中。原来的 block 布局下 flex:1 完全无效。 */
   display: flex;
   flex-direction: column;
 }
 /* 有内容时（目录树 / 大纲列表）不该被 flex 拉伸破坏 */
-.sidebar-body > .tree,
+.sidebar-body > .tree-pane,
 .sidebar-body > .outline {
   flex: 1;
+  /* flex 子项默认 min-height:auto，不加这行的话，
+     内容比容器高时它会撑破容器而不是让内部滚动 —— 底栏会被顶出视口。 */
+  min-height: 0;
+}
+/* 大纲列表自己滚动：条目多时只滚列表，页签与侧栏边界都不动 */
+.sidebar-body > .outline {
+  overflow-y: auto;
 }
 /* 无工作区 / 大纲为空：内容在剩余空间里上下居中。
    注意：不要加 padding-bottom 去「压低」——那会让视觉中心偏上。
@@ -337,6 +358,20 @@ body.resizing-col * {
 }
 
 /* 文件树 */
+.tree-pane {
+  /* 竖向 flex：滚动区占满剩余高度，开关贴在最底部且不参与滚动 */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.tree-scroll {
+  flex: 1;
+  /* 同样必须 min-height:0，否则不会滚动而是撑破 .tree-pane */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .tree {
   font-size: 13px;
 }
@@ -344,17 +379,24 @@ body.resizing-col * {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 6px;
+  /* 缩进由 --d（层级深度）算出，且**封顶**：见下方 calc 注释。
+     每个 .tree-row 都是整行可点的热区，这里必须保证任何层级下
+     行都有足够的可点宽度，不能被缩进挤成一条缝。 */
+  padding: 3px 6px 3px calc(10px + var(--d, 0) * 13px);
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
 }
+.tree-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
 .tree-row:hover {
   background: var(--bg-sunken);
 }
 .tree-row.file {
-  padding-left: 22px;
+  padding-left: calc(10px + var(--d, 0) * 13px);
 }
 /* 当前打开的文件：单文档模式下左侧高亮是唯一的「我在编辑哪个文件」指示，
    所以要比普通 hover 更醒目 —— 左侧竖条 + 强调色 + 加粗。 */
@@ -374,10 +416,14 @@ body.resizing-col * {
   border-radius: 0 2px 2px 0;
   background: var(--accent);
 }
+/* 层级缩进**不再用嵌套 padding 累加**。
+   旧写法每层 `padding-left:12px + margin-left:8px`（共 20px），
+   侧栏默认只有 196px —— 深度到第 10 层，可点宽度就被缩进吃光，
+   那一行的文件名被 overflow:hidden 裁掉、几乎点不中。
+   现在改成「平铺结构 + 按深度算缩进」，并在 JS 里把 --d 封顶，
+   最深也就 10 + 5*13 = 75px，任何层级的行都留得下 100px 以上的热区。 */
 .tree-children {
-  padding-left: 12px;
-  border-left: 1px solid var(--border);
-  margin-left: 8px;
+  display: contents;
 }
 .tree-row span {
   overflow: hidden;
@@ -390,25 +436,42 @@ body.resizing-col * {
 /* 「显示全部文件」开关：贴在文件树底部，默认状态低调、不与文件名抢视线。
    勾选框保留原生 appearance —— 系统自绘的勾选框在各平台观感最自然，
    强行自定义反而容易在暗色下糊成一片。 */
+/* 「显示全部文件」开关：**固定在文件树区域底部**，只有一只眼睛。
+ *
+ * 三条约束（每条都对应一个真实踩过的坑）：
+ *  1. `flex-shrink: 0` —— 它是 .tree-pane 的最后一个子项，
+ *     不写会被上方滚动区的 min-height 挤压甚至整条消失。
+ *  2. `width: 100%` + `justify-content: center` —— 去掉勾选框和文字后
+ *     热区只剩一个 20px 的图标，必须把整条底栏都变成点击区，
+ *     否则「点眼睛」这个动作本身就很难点中。
+ *  3. `border-top` 画在底栏**上沿** —— 它是「树到此为止」的边界线；
+ *     若把 border 放在元素内部会随滚动内容一起动，失去分界作用。
+ */
 .tree-toggle {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  padding: 5px 6px;
+  justify-content: center;
+  width: 100%;
+  padding: 7px 0;
   border-top: 1px solid var(--border);
+  background: var(--bg-elev);
   color: var(--fg-muted);
-  font-size: 12px;
   cursor: pointer;
   user-select: none;
+  transition: color 0.12s, background 0.12s;
 }
 .tree-toggle:hover {
   color: var(--fg);
+  background: var(--bg-sunken);
 }
-.tree-toggle input {
-  margin: 0;
-  cursor: pointer;
-  accent-color: var(--accent);
+/* 开启态：眼睛换成 Eye 且染成强调色，一眼能看出「现在是全量模式」 */
+.tree-toggle[aria-pressed='true'] {
+  color: var(--accent);
+}
+.tree-toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
 }
 /* 白名单之外的文件：可见但明确「不可用」。
    不用 display:none —— 用户需要知道文件存在，点一下得到明确提示，

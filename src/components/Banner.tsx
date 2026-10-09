@@ -1,5 +1,6 @@
 import { useStore } from '../state/store'
 import { AlertTriangle, Info, X } from 'lucide-react'
+import { openExternal, RELEASES_PAGE } from '../lib/updater'
 
 // 顶部提示条：把从前被静默吞掉的错误/权限状态显式告诉用户
 export default function Banner() {
@@ -16,6 +17,11 @@ export default function Banner() {
       {notice.action === 'regrant' && (
         <button className="banner-action" onClick={() => void regrantRoot()}>
           重新授权
+        </button>
+      )}
+      {notice.action === 'release' && (
+        <button className="banner-action" onClick={() => openExternal(RELEASES_PAGE)}>
+          前往下载
         </button>
       )}
       <button className="banner-close" onClick={() => setNotice(null)} title="关闭">

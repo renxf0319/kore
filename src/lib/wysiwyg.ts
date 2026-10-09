@@ -133,6 +133,16 @@ function inMark(ctx: Ctx, from: number, to: number): boolean {
   return ctx.cursorPos >= from && ctx.cursorPos < to
 }
 
+/**
+ * 一条命中里「真正要显示给用户看」的部分有多长（不含首尾标记）。
+ * 目前只有 tail = -1 的链接规则用到：可见内容就是 m[1]（链接文字）。
+ * 规则若没有 group(1），退化为整段（不额外隐藏）。
+ */
+function visibleLen(m: RegExpExecArray): number {
+  const g = m[1]
+  return g === undefined ? m[0].length : g.length
+}
+
 // --- 块级语法 -----------------------------------------------------------
 const HEADING_RE = /^(#{1,6})(\s+|$)(.*)$/
 const UL_RE = /^(\s*)([-*+])(\s+)(.*)$/
@@ -144,7 +154,11 @@ const TASK_RE = /^(\s*)([-*+])(\s+)(\[[ xX]\])(\s*)(.*)$/
 
 /**
  * 行内规则。
- * head/tail = 成对标记的首尾字符数，0 表示该侧不隐藏（链接只藏头尾的方括号/URL）。
+ * head/tail = 成对标记的首尾字符数，0 表示该侧不隐藏（图片整段替换）。
+ *
+ * tail = -1 是哨兵，表示「**藏掉尾部直到可见内容结束**」——
+ * 目前只有链接用它：`[文字](url)` 只留 `文字`，`](url)` 整段消失。
+ *
  * 优先级即数组顺序：先命中的规则占用区间，后面的规则不能再吃到同一段文本。
  *
  * dom 是**同一批规则的第二个消费者**：表格单元格要生成真实 DOM 节点（<code>/<a>），
@@ -156,6 +170,12 @@ interface InlineRule {
   head: number
   tail: number
   image?: boolean
+  /**
+   * 可见内容是否就是 group(1) 本身。
+   * 为 true 时 renderInlineDOM 会跳过递归（链接的 group(1) 已被 dom() 塞进 <a>）。
+   * 用显式字段而不是比对 cls 字符串 —— 后者会在改类名时静默失效。
+   */
+  selfContained?: boolean
   dom?: (m: RegExpExecArray) => Node
 }
 
@@ -170,11 +190,19 @@ const el = <K extends keyof HTMLElementTagNameMap>(
 
 const INLINE_RULES: InlineRule[] = [
   // 行内代码最先：避免 `**x**` 里的星号被当成强调
-  { re: /`([^`\n]+)`/g, cls: 'cm-md-code', head: 1, tail: 1,
+  { re: /`([^`\n]+)`/g, cls: 'cm-md-code', head: 1, tail: 1, selfContained: true,
     dom: (m) => { const c = el('code', 'cm-md-code'); c.textContent = m[1]; return c } },
-  { re: /!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: '', head: 0, tail: 0, image: true,
+  { re: /!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: '', head: 0, tail: 0, image: true, selfContained: true,
     dom: (m) => { const i = el('img', 'cm-md-img'); i.src = m[2]; i.alt = m[1] ?? ''; return i } },
-  { re: /\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: 'cm-md-link', head: 1, tail: 0,
+  // 链接：head 藏 `[`，tail 藏**整段 `](url)`**（含右方括号、圆括号、URL 本体）。
+  //
+  // ⚠️ 这里必须整段藏，不能只藏 `]`。曾经写成 tail:0 只藏 `[`，后果是
+  // `](https://a.b)` 原样留在渲染文本里 —— 实测点击那一段时，
+  // CodeMirror 的 posAtCoords 因为该区间已被 mark 装饰 claim、却没有对应的
+  // replace 装饰而**无法映射**，光标死死卡在链接文字末尾不动：
+  // 点 `]`、点 `(`、点 URL 的任意位置，光标 offset 全都等于链接文字结束处。
+  // 表现为「链接后面那一段鼠标点不进去」。tail 用哨兵 -1 表示「藏到 from+1 之前的所有内容」。
+  { re: /\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, cls: 'cm-md-link', head: 1, tail: -1,
     dom: (m) => { const a = el('a', 'cm-md-link'); a.href = m[2]; a.textContent = m[1]; return a } },
   { re: /\*\*\*([^*]+)\*\*\*/g, cls: 'cm-md-strong cm-md-em', head: 3, tail: 3,
     dom: (m) => { const s = el('strong', 'cm-md-strong'); const e2 = el('em'); e2.textContent = m[1]; s.appendChild(e2); return s } },
@@ -327,7 +355,7 @@ function processInline(ctx: Ctx, offset: number, text: string): void {
         // 登记进 marks：光标进出图片会改变结果，短路判断必须知道这件事
         ctx.marks.push([from, to])
         if (!inMark(ctx, from, to)) {
-          add(ctx, from, to, Decoration.replace({ widget: new ImageWidget(src, m[1] ?? '') }))
+          add(ctx, from, to, Decoration.replace({ widget: new ImageWidget(src, m[1] ?? '', from) }))
         } else {
           add(ctx, from, to, Decoration.mark({ class: 'cm-md-link' }))
         }
@@ -342,7 +370,10 @@ function processInline(ctx: Ctx, offset: number, text: string): void {
       // 判据是「光标是否在**这一小段标记**里」而不是「在不在本行」——
       // 否则点一下 `**粗体**` 里的文字，整行的 `**` 就都冒出来了。
       if (rule.head > 0) hideInline(ctx, from, from + rule.head)
-      if (rule.tail > 0) hideInline(ctx, to - rule.tail, to)
+      // tail = -1：可见内容是 m[1]，从它结束处一直藏到整段末尾。
+      // 链接的 `](url)` 就靠这条消失 —— 留着它会让那一段点不动。
+      if (rule.tail === -1) hideInline(ctx, from + rule.head + visibleLen(m), to)
+      else if (rule.tail > 0) hideInline(ctx, to - rule.tail, to)
     }
   }
 }
@@ -532,11 +563,12 @@ function renderInlineDOM(text: string): DocumentFragment {
       claimed.push([from, to])
 
       const node = rule.dom(m)
-      // 行内代码 / 图片这类「叶子」内容原样放进 textContent；
-      // 其余规则（粗体/斜体/链接等）的 group(1) 是真正要递归的子内容
-      const innerIdx = rule.cls === 'cm-md-code' || rule.image ? -1 : 1
-      if (innerIdx > 0 && m[innerIdx] !== undefined && rule.cls !== 'cm-md-link') {
-        const inner = renderInlineDOM(m[innerIdx])
+      // selfContained 规则（行内代码 / 图片 / 链接）的可见内容已由 dom() 放进
+      // 自己的 textContent，无需也不能再递归 —— 否则会重复或破坏结构。
+      // 其余规则（粗体/斜体/高亮等）的 group(1) 才是要递归的子内容，
+      // 这样 `**无 `${}`**` 里的 `${}` 依旧能渲染成 <code>。
+      if (!rule.selfContained && m[1] !== undefined) {
+        const inner = renderInlineDOM(m[1])
         node.textContent = ''
         node.appendChild(inner)
       }
@@ -614,25 +646,46 @@ class CheckboxWidget extends WidgetType {
   }
 }
 
+/**
+ * 图片。
+ *
+ * 点击行为与 TableWidget 一致：**把光标送到图片语法的起点**，
+ * 于是图片随即回落成原始 `![alt](src)` 源码（cursorPos 落进了 marks 区间），
+ * 用户就能改链接。图片单独占一行时若没有这段处理，整行就只有一张图，
+ * 任何位置点下去都没有反应 —— 表现为「这一行点不进去」。
+ */
 class ImageWidget extends WidgetType {
   constructor(
     readonly src: string,
-    readonly alt: string
+    readonly alt: string,
+    /** 图片语法在文档中的起点，供点击定位 */
+    readonly from: number
   ) {
     super()
   }
   eq(other: ImageWidget): boolean {
     return other.src === this.src && other.alt === this.alt
   }
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const img = document.createElement('img')
     img.className = 'cm-md-img'
     img.src = this.src
     img.alt = this.alt
     img.draggable = false
+    img.title = '点击编辑图片地址'
+    // 与 TableWidget 相同的两条约束，顺序也不能错：
+    //  1. preventDefault —— 否则 CM 先处理这次点击，把光标放到替换区边界；
+    //  2. 先 focus 再 dispatch —— 光标行靠 hasFocus 判断，
+    //     先 dispatch 的话编辑器还没聚焦，图片会立刻又渲染回 <img>。
+    img.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      view.focus()
+      view.dispatch({ selection: { anchor: this.from }, userEvent: 'select.pointer' })
+    })
     return img
   }
   ignoreEvent(): boolean {
+    // 交给上面自己的 mousedown 处理，不走编辑器默认行为
     return true
   }
 }
