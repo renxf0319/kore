@@ -6,6 +6,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // 用系统默认浏览器打开外部链接（「检查更新 → 前往下载」）。
         .plugin(tauri_plugin_opener::init())
+        // 应用内自动更新（下载 / 校验签名 / 安装）与装完重启
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::read_dir,
             commands::read_file,

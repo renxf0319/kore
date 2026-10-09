@@ -61,10 +61,32 @@ jobs:
           rm -f package-lock.json
           npm install --no-audit --no-fund
 
+      # 应用内更新需要签名私钥。但「没配密钥」不该让整个发版挂掉 ——
+      # createUpdaterArtifacts 在缺少密钥时会让 Tauri 直接构建失败，
+      # 所以检测不到就把它去掉：代价只是这次不发更新清单，安装包照常产出。
+      - name: Check updater signing key
+        id: signing
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "已配置签名私钥：本次会生成更新包与 latest.json"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=未配置更新签名密钥::仓库 Secret 缺少 TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD，本次不生成更新包（安装包照常产出，但应用内更新不可用）。"
+            node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));delete j.bundle.createUpdaterArtifacts;fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
+          fi
+
       - name: Build app and upload to release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 应用内更新的签名。存在时 tauri-action 会一并生成并上传 latest.json，
+          # 客户端按 tauri.conf.json 的 plugins.updater.endpoints 去取。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: 'Kore v__VERSION__'

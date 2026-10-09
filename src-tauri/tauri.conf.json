@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kore",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "identifier": "com.kore.app",
   "build": {
     "frontendDist": "../dist",
@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -36,5 +37,12 @@
       "icons/icon.ico"
     ]
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2ODFGMzE3NDUyREQzOUUKUldTZTB5MUZGL09CbGt6d0JZSXZUNk1rOGpINEp6SW1zZUpNTUc5dTZEYVZEWWFCYWdtMDNCS0cK",
+      "endpoints": [
+        "https://github.com/renxf0319/kore/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

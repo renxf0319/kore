@@ -1,6 +1,6 @@
 [package]
 name = "kore"
-version = "0.3.9"
+version = "0.3.10"
 description = "Kore 极速本地 Markdown 编辑器"
 authors = ["Kore Contributors"]
 edition = "2021"
@@ -21,6 +21,12 @@ tauri-plugin-dialog = "2"
 # ⚠️ 不能用 window.open：Tauri 的 WebView 不会把它交给系统浏览器，
 # 表现就是点了「前往下载」毫无反应。必须走这个插件。
 tauri-plugin-opener = "2"
+# 应用内自动更新：下载 → 校验签名 → 安装 → 重启。
+# ⚠️ 签名校验**无法关闭**，所以必须配好签名私钥（CI 里走 Secret），
+# 并把公钥写进 tauri.conf.json 的 plugins.updater.pubkey。
+tauri-plugin-updater = "2"
+# 更新装完后重启应用（updater 的收尾动作要调 relaunch）
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

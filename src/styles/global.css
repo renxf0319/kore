@@ -1080,6 +1080,16 @@ body.resizing-col * {
   /* 提示条上的「前往下载」等按钮是行动号召，保留手型 */
   cursor: pointer;
 }
+/* 次要按钮（「前往下载」在「立即更新」旁边）：去掉描边，弱化一档，
+   保证「立即更新」是视觉上的主选。 */
+.banner-action.subtle {
+  border-color: transparent;
+  opacity: 0.75;
+}
+.banner-action.subtle:hover {
+  opacity: 1;
+  border-color: currentColor;
+}
 .banner-close {
   color: inherit;
   opacity: 0.6;

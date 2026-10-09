@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { exportHtml, exportPdf } from '../lib/export'
 import { newWindow, shortcutOf } from '../lib/commands'
-import { checkUpdate, openExternal, RELEASES_PAGE } from '../lib/updater'
+import { checkUpdate, openExternal, RELEASES_PAGE, runInAppUpdate } from '../lib/updater'
 
 type MenuKey = 'file' | 'theme' | 'about' | null
 
@@ -296,6 +296,10 @@ function AboutItems({ onPick }: { onPick: (fn?: () => void) => void }) {
     },
     { sep: true },
     { label: '检查更新…', onSelect: () => void doCheck(setNotice) },
+    // 直接走「下载 → 校验 → 安装 → 重启」，不用先去浏览器
+    ...(mode === 'tauri'
+      ? [{ label: '下载并安装更新…', onSelect: () => runInAppUpdate(setNotice) }]
+      : []),
     { label: '前往下载页', onSelect: () => void openLink(RELEASES_PAGE, setNotice) },
     { sep: true },
     { label: '项目主页', onSelect: () => void openLink(__REPO_URL__, setNotice) },
@@ -319,7 +323,7 @@ async function openLink(
 }
 
 async function doCheck(
-  setNotice: (n: { kind: 'info' | 'error'; text: string; action?: 'release' }) => void
+  setNotice: (n: { kind: 'info' | 'error'; text: string; action?: 'release' | 'update' }) => void
 ): Promise<void> {
   setNotice({ kind: 'info', text: '正在检查更新…' })
   try {
@@ -328,7 +332,7 @@ async function doCheck(
       setNotice({
         kind: 'info',
         text: `发现新版本 ${latest}（当前 ${current}）`,
-        action: 'release',
+        action: 'update',
       })
       return
     }

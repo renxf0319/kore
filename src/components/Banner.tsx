@@ -1,14 +1,27 @@
 import { useStore } from '../state/store'
 import { AlertTriangle, Info, X } from 'lucide-react'
-import { openExternal, RELEASES_PAGE } from '../lib/updater'
+import { openExternal, RELEASES_PAGE, runInAppUpdate } from '../lib/updater'
 
 // 顶部提示条：把从前被静默吞掉的错误/权限状态显式告诉用户
 export default function Banner() {
   const notice = useStore((s) => s.notice)
   const setNotice = useStore((s) => s.setNotice)
   const regrantRoot = useStore((s) => s.regrantRoot)
+  const isTauri = useStore((s) => s.mode === 'tauri')
 
   if (!notice) return null
+
+  /** 退路：跳浏览器下载页（与应用内更新并存，互为兜底） */
+  const openDownloadPage = () => {
+    void openExternal(RELEASES_PAGE).then((ok) => {
+      if (!ok) {
+        setNotice({
+          kind: 'info',
+          text: `无法自动打开浏览器，请手动访问：${RELEASES_PAGE}`,
+        })
+      }
+    })
+  }
 
   return (
     <div className={`banner ${notice.kind} no-print`} role="status">
@@ -19,24 +32,19 @@ export default function Banner() {
           重新授权
         </button>
       )}
-      {notice.action === 'release' && (
-        <button
-          className="banner-action"
-          onClick={() => {
-            // 打不开就把链接明文贴出来，让用户能手动复制 ——
-            // 「点了没反应且不告诉你链接在哪」是最糟的失败方式。
-            // 这里刻意去掉 action：提示条变成一条纯信息（带可复制的地址），
-            // 而不是继续挂着一个点了还是没反应的按钮。
-            void openExternal(RELEASES_PAGE).then((ok) => {
-              if (!ok) {
-                setNotice({
-                  kind: 'info',
-                  text: `无法自动打开浏览器，请手动访问：${RELEASES_PAGE}`,
-                })
-              }
-            })
-          }}
-        >
+      {notice.action === 'update' && isTauri && (
+        <>
+          <button className="banner-action" onClick={() => runInAppUpdate(setNotice)}>
+            立即更新
+          </button>
+          <button className="banner-action subtle" onClick={openDownloadPage}>
+            前往下载
+          </button>
+        </>
+      )}
+      {/* 浏览器模式没有应用内更新能力，只给下载页 */}
+      {(notice.action === 'release' || (notice.action === 'update' && !isTauri)) && (
+        <button className="banner-action" onClick={openDownloadPage}>
           前往下载
         </button>
       )}

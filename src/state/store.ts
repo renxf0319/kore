@@ -9,7 +9,10 @@ export interface Notice {
   kind: 'info' | 'error'
   text: string
   // 需要用户手势才能完成的动作，交给界面渲染成按钮
-  action?: 'regrant' | 'release'
+  //  - regrant：浏览器端重新授权文件夹
+  //  - release：去浏览器下载页
+  //  - update ：应用内下载并安装更新（推荐路径）
+  action?: 'regrant' | 'release' | 'update'
 }
 
 function errText(e: unknown): string {

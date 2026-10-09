@@ -165,4 +165,92 @@ export async function checkUpdate(): Promise<UpdateInfo> {
   }
 }
 
+/**
+ * **应用内更新**：下载 → 校验签名 → 安装 → 重启，全程不离开 Kore。
+ *
+ * 与 `openExternal(RELEASES_PAGE)`（跳浏览器自己下载）的区别就在这 ——
+ * 这是需求里要的「便捷一点」。
+ *
+ * 几个关键事实：
+ *  - 走 Tauri 官方 updater 插件，**签名校验无法关闭**；更新包的签名由 CI 用
+ *    私钥生成，客户端用 `tauri.conf.json` 里的公钥校验，防止更新通道被劫持。
+ *  - 更新地址是 `plugins.updater.endpoints` 里的静态清单
+ *    （`/releases/latest/download/latest.json`，由 tauri-action 自动生成上传）。
+ *  - **Windows 上安装时应用会被安装器接管并自动重启**（NSIS 带 `/R`），
+ *    所以下面的 `relaunch()` 在 Windows 通常执行不到；macOS / Linux 才靠它。
+ *
+ * @param onStatus 阶段性文案回调（下载进度也走它），由调用方渲染到提示条。
+ *                 失败时抛错，调用方负责提示并给出「去浏览器下载」的退路。
+ */
+export async function installUpdate(onStatus: (text: string) => void): Promise<void> {
+  if (!isTauri) throw new Error('浏览器模式不支持应用内更新，请用桌面版')
+
+  const { check } = await import('@tauri-apps/plugin-updater')
+  const { relaunch } = await import('@tauri-apps/plugin-process')
+
+  onStatus('正在获取更新包…')
+  const update = await check()
+  if (!update) {
+    onStatus('已是最新版本，无需更新')
+    return
+  }
+
+  let downloaded = 0
+  let total: number | null = null
+  let lastPct = -1
+
+  onStatus(`正在下载 v${update.version}…`)
+  await update.downloadAndInstall((e) => {
+    if (e.event === 'Started') {
+      total = e.data.contentLength ?? null
+      return
+    }
+    if (e.event === 'Progress') {
+      downloaded += e.data.chunkLength
+      // 只在**整数百分比变化**时才更新 UI：下载事件按 chunk 高频触发，
+      // 每次 setState 会让提示条疯狂重渲染（文字抖动、看着像卡了）。
+      if (total) {
+        const pct = Math.floor((downloaded / total) * 100)
+        if (pct !== lastPct) {
+          lastPct = pct
+          onStatus(`正在下载 v${update.version}… ${pct}%`)
+        }
+      }
+      return
+    }
+    onStatus('下载完成，正在安装…')
+  })
+
+  onStatus('正在安装并重启…')
+  await relaunch()
+}
+
+/** 提示条的最小接口。刻意不直接依赖 store 的类型，免得 lib 与 state 互相引用。 */
+export interface NoticeSink {
+  (n: {
+    kind: 'info' | 'error'
+    text: string
+    action?: 'regrant' | 'release' | 'update'
+  }): void
+}
+
+/**
+ * 「立即更新」的完整交互：进度写进提示条；**失败退回「去浏览器下载」**。
+ *
+ * Banner 与「关于」菜单共用这一份 —— 两个入口各写一遍，
+ * 迟早会行为漂移（一个改了文案另一个忘了）。
+ */
+export function runInAppUpdate(setNotice: NoticeSink): void {
+  void installUpdate((text) => setNotice({ kind: 'info', text })).catch((e: unknown) => {
+    const msg = e instanceof Error ? e.message : String(e)
+    // 更新失败最常见的原因是网络或清单缺失，此时手动下载仍然可行 ——
+    // 所以退回「前往下载」，而不是把用户卡在一条点不动的错误信息上。
+    setNotice({
+      kind: 'info',
+      text: `应用内更新失败：${msg}。可以手动前往下载页更新。`,
+      action: 'release',
+    })
+  })
+}
+
 export { RELEASES_PAGE }
