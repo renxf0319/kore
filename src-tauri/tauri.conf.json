@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk2ODFGMzE3NDUyREQzOUUKUldTZTB5MUZGL09CbGt6d0JZSXZUNk1rOGpINEp6SW1zZUpNTUc5dTZEYVZEWWFCYWdtMDNCS0cK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGQzRCN0JDQzE4RTRGREIKUldUYlQ0N0J2TGZFajlESHpnZWJMUXhwaXh0bHFYSzlwU0wzU3RhVTQ3dEd1SmpQbUdKWGhBVk0K",
       "endpoints": [
         "https://github.com/renxf0319/kore/releases/latest/download/latest.json"
       ]
