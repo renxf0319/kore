@@ -13,6 +13,8 @@
  * 访问 api.github.com 不稳定。这些都会走到 catch 分支，给出可操作的提示。
  */
 
+import { isTauri } from './fs'
+
 const RELEASES_API = 'https://api.github.com/repos/renxf0319/kore/releases'
 const RELEASES_PAGE = `${__REPO_URL__}/releases/latest`
 
@@ -77,9 +79,48 @@ export function isNewer(latest: string, current: string): boolean {
   return false
 }
 
-/** 打开外部链接。桌面端 WebView 会拦截普通导航，这里统一走新窗口。 */
-export function openExternal(url: string): void {
-  window.open(url, '_blank', 'noopener,noreferrer')
+/**
+ * 用**系统默认浏览器**打开外部链接。
+ *
+ * ⚠️ 桌面端**不能**用 `window.open()` —— Tauri 的 WebView 不会把它交给系统浏览器，
+ * 点了「前往下载」会**毫无反应**（本 bug 的成因）。
+ * 正确做法是 opener 插件（Rust 侧 `tauri-plugin-opener` + `opener:default` 权限）。
+ *
+ * @returns 是否成功打开。false 时调用方应把链接**明文展示**给用户，
+ *          让对方能手动复制 —— 打不开又不说链接在哪，是最糟的结果。
+ */
+export async function openExternal(url: string): Promise<boolean> {
+  if (isTauri) {
+    try {
+      // 动态 import：浏览器模式下这个包根本不会被加载
+      const { openUrl } = await import('@tauri-apps/plugin-opener')
+      await openUrl(url)
+      return true
+    } catch (e) {
+      console.error('[openExternal] opener 插件打开失败:', e)
+      // 刻意**不**降级到 window.open：它在 Tauri 里本来就打不开，
+      // 万一返回了个非 null 的窗口对象，还会让我们误报「成功」。
+      return false
+    }
+  }
+
+  // ---- 浏览器模式 ----
+  // ⚠️ 不能用 `window.open(url, '_blank', 'noopener')` ——
+  // 按规范，带 noopener 时返回值**恒为 null**，会被误判成「打开失败」。
+  // 改成不带 noopener 打开，拿到句柄后立刻把 opener 置空（等效的安全性，
+  // 且保留了「是否被拦截」这个真实信号：被拦截时返回 null）。
+  try {
+    const w = window.open(url, '_blank')
+    if (!w) return false
+    try {
+      w.opener = null
+    } catch {
+      /* 跨源时可能不可写，忽略 */
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

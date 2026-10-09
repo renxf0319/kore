@@ -296,11 +296,26 @@ function AboutItems({ onPick }: { onPick: (fn?: () => void) => void }) {
     },
     { sep: true },
     { label: '检查更新…', onSelect: () => void doCheck(setNotice) },
-    { label: '前往下载页', onSelect: () => openExternal(RELEASES_PAGE) },
+    { label: '前往下载页', onSelect: () => void openLink(RELEASES_PAGE, setNotice) },
     { sep: true },
-    { label: '项目主页', onSelect: () => openExternal(__REPO_URL__) },
+    { label: '项目主页', onSelect: () => void openLink(__REPO_URL__, setNotice) },
   ]
   return <Items items={items} onPick={onPick} />
+}
+
+/**
+ * 打开外部链接；**失败时把链接明文写进提示条**。
+ *
+ * 桌面端曾因用 `window.open` 而点了完全没反应（详见 lib/updater.ts 的 openExternal）。
+ * 就算将来再有环境打不开，至少要让用户看见链接能手动复制 ——
+ * 「点了没反应、也不告诉你地址」是最糟的失败方式。
+ */
+async function openLink(
+  url: string,
+  setNotice: (n: { kind: 'info' | 'error'; text: string }) => void
+): Promise<void> {
+  const ok = await openExternal(url)
+  if (!ok) setNotice({ kind: 'info', text: `无法自动打开浏览器，请手动访问：${url}` })
 }
 
 async function doCheck(

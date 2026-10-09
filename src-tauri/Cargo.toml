@@ -1,6 +1,6 @@
 [package]
 name = "kore"
-version = "0.3.7"
+version = "0.3.8"
 description = "Kore 极速本地 Markdown 编辑器"
 authors = ["Kore Contributors"]
 edition = "2021"
@@ -17,6 +17,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# 打开外部链接（「检查更新」的下载页）。
+# ⚠️ 不能用 window.open：Tauri 的 WebView 不会把它交给系统浏览器，
+# 表现就是点了「前往下载」毫无反应。必须走这个插件。
+tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

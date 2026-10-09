@@ -4,6 +4,8 @@ mod commands;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // 用系统默认浏览器打开外部链接（「检查更新 → 前往下载」）。
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::read_dir,
             commands::read_file,

@@ -20,7 +20,23 @@ export default function Banner() {
         </button>
       )}
       {notice.action === 'release' && (
-        <button className="banner-action" onClick={() => openExternal(RELEASES_PAGE)}>
+        <button
+          className="banner-action"
+          onClick={() => {
+            // 打不开就把链接明文贴出来，让用户能手动复制 ——
+            // 「点了没反应且不告诉你链接在哪」是最糟的失败方式。
+            // 这里刻意去掉 action：提示条变成一条纯信息（带可复制的地址），
+            // 而不是继续挂着一个点了还是没反应的按钮。
+            void openExternal(RELEASES_PAGE).then((ok) => {
+              if (!ok) {
+                setNotice({
+                  kind: 'info',
+                  text: `无法自动打开浏览器，请手动访问：${RELEASES_PAGE}`,
+                })
+              }
+            })
+          }}
+        >
           前往下载
         </button>
       )}

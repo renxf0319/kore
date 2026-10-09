@@ -1,7 +1,7 @@
 {
   "name": "kore",
   "private": true,
-  "version": "0.3.7",
+  "version": "0.3.8",
   "type": "module",
   "description": "Kore · 极速本地 Markdown 编辑器（开源 / 无云同步）",
   "license": "MIT",
@@ -32,6 +32,7 @@
     "@codemirror/view": "^6.34.1",
     "@tauri-apps/api": "^2.0.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
+    "@tauri-apps/plugin-opener": "^2.7.0",
     "codemirror": "^6.0.1",
     "dompurify": "^3.1.7",
     "highlight.js": "^11.10.0",
