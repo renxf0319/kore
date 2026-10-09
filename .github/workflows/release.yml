@@ -69,7 +69,14 @@ jobs:
           tagName: v__VERSION__
           releaseName: 'Kore v__VERSION__'
           releaseBody: 'Windows 安装包（.exe 双击安装 / .msi 供企业部署）。下载后安装即可使用，无云同步。'
-          # 开发阶段直接发布（不建草稿），方便直接点下载链接取包
+          # 直接发布（不建草稿），方便直接点下载链接取包
           releaseDraft: false
-          prerelease: true
+          # ⚠️ 必须为 false（正式版），不能是 true（预发布）。
+          #
+          # GitHub 的 `/releases/latest` **排除所有 prerelease**：
+          # 一旦这里为 true，该接口恒定 404，于是**所有**装在旧版本上的
+          # 「检查更新」都拿不到版本号（v0.3.6 及更早的客户端用的正是这个接口）。
+          # v0.3.7 起客户端已改用 `/releases` 列表接口（能识别 prerelease），
+          # 但为了让老客户端也能被发现，发布出去的包必须是正式版。
+          prerelease: false
           args: ${{ matrix.args }}
