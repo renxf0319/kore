@@ -23,7 +23,11 @@ button {
   color: var(--fg);
   background: transparent;
   border: none;
-  cursor: pointer;
+  /* 默认**不**用手型光标。
+     按钮遍布顶栏菜单名、侧栏页签、正文里的标记等地方，
+     手型在这些「切换 / 选中」语义的位置上既吵又不像桌面应用。
+     真正需要手型的（开新窗口的链接、文件树行、复选框等）在各自规则里单独声明。 */
+  cursor: default;
 }
 
 /* ---------------- 布局骨架 ---------------- */
@@ -69,6 +73,8 @@ button {
   font-weight: 400;
   letter-spacing: 0.02em;
   color: var(--fg);
+  /* 明确写死：顶栏菜单名悬停时是鼠标箭头，不是手型 */
+  cursor: default;
 }
 .menu-trigger:hover,
 .menu-trigger.open {
@@ -104,6 +110,11 @@ button {
 .menu-item:hover {
   background: var(--accent-soft);
   color: var(--accent);
+}
+/* 菜单项是**展开后的下拉内容**：这里反而是手型最自然的场合，
+   所以即便全局 button 已改为 default，也显式恢复成 pointer。 */
+.menu-item:not(.disabled) {
+  cursor: pointer;
 }
 /* 禁用态（版本号等纯信息）：灰字、不可点。
    仍保留 hover 不变色，这样用户能看出「这是一行信息」而非「点了没反应」。 */
@@ -205,6 +216,8 @@ button {
      这里显式清零，只靠下划线和字重区分激活态。 */
   box-shadow: none;
   outline: none;
+  /* 页签是「切换当前面板」的控件，不是超链接 —— 保持箭头光标 */
+  cursor: default;
 }
 .sidebar-tab:focus,
 .sidebar-tab:focus-visible,
@@ -311,6 +324,8 @@ body.resizing-col * {
   align-items: center;
   gap: 6px;
   color: var(--fg);
+  /* 与欢迎页一致：发起动作的按钮保留手型 */
+  cursor: pointer;
 }
 .ghost-btn:hover {
   border-color: var(--accent);
@@ -334,6 +349,8 @@ body.resizing-col * {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* 大纲条目是「跳到某标题」的导航项，用箭头而不是手型 */
+  cursor: default;
 }
 .outline li button:hover {
   background: var(--bg-sunken);
@@ -384,7 +401,9 @@ body.resizing-col * {
      行都有足够的可点宽度，不能被缩进挤成一条缝。 */
   padding: 3px 6px 3px calc(10px + var(--d, 0) * 13px);
   border-radius: 4px;
-  cursor: pointer;
+  /* 文件树行是导航项：箭头光标。
+     （行内若有真的超链接，由更具体的规则单独改成手型。） */
+  cursor: default;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -457,7 +476,8 @@ body.resizing-col * {
   border-top: 1px solid var(--border);
   background: var(--bg-elev);
   color: var(--fg-muted);
-  cursor: pointer;
+  /* 开关类控件：箭头光标（与顶栏菜单、页签保持一致） */
+  cursor: default;
   user-select: none;
   transition: color 0.12s, background 0.12s;
 }
@@ -1049,12 +1069,15 @@ body.resizing-col * {
   border-radius: 4px;
   color: inherit;
   font-size: 12px;
+  /* 提示条上的「前往下载」等按钮是行动号召，保留手型 */
+  cursor: pointer;
 }
 .banner-close {
   color: inherit;
   opacity: 0.6;
   display: inline-flex;
   padding: 2px;
+  cursor: pointer;
 }
 .banner-close:hover {
   opacity: 1;
@@ -1095,6 +1118,9 @@ body.resizing-col * {
   border-radius: 6px;
   font-size: 13px;
   background: var(--bg);
+  /* 欢迎页的「新建 / 打开」是**发起动作**的按钮（不是面板切换），
+     这里保留手型，与全局 button 改 default 的取向区分开。 */
+  cursor: pointer;
 }
 .welcome-actions button:hover {
   border-color: var(--accent);

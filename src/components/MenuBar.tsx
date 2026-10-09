@@ -19,10 +19,59 @@ interface Item {
   cmdId?: string
 }
 
-// Typora 式顶栏：文件 / 主题 / 关于。点击展开，点击外部或 Esc 收起。
+// 关键：React 18 把 onClick 委托在 **#root 容器**上，而不是 document。
+// 于是同一次点击里「祖先冒泡(#root / React 委托)」会早于「目标冒泡(.menu-trigger 的 onClick)」——
+// 正是这个反直觉的顺序，决定了「关闭」必须放在 click 冒泡的 document 层、
+// 而不能放在更早的 mousedown 里（否则会抢在 onClick 之前把状态改掉）。
+//
+// Typora 式顶栏：文件 / 主题 / 关于。点击展开，点击任意处或 Esc 收起。
+// 已展开时，鼠标滑过其他菜单名会**直接切换**（无需再点一次）。
 export default function MenuBar() {
   const [open, setOpen] = useState<MenuKey>(null)
   const barRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * 菜单名在 click 时**真正读到的最新的 open**。
+   *
+   * ⚠️ 为什么必须用 ref 而不是 state：点击菜单名时，如果先把 open 置 null
+   * 再让 onClick 去 toggle，onClick 闭包里的 `open` 会是上一次渲染的旧值，
+   * 「已展开时点击同一个菜单」就会被判成「本来没开」→ 又打开，
+   * 表现为「点一下关不掉、得点两下」。读这个 ref 才拿得到真实状态。
+   * （当前实现里 onClick 先跑、不会被抢改，这个 ref 依旧是唯一可靠的读法：
+   *   state 的更新是异步的，同一次事件里 back-to-back 的读写必然踩到旧值。）
+   */
+  const openRef = useRef<MenuKey>(null)
+  openRef.current = open
+
+  useEffect(() => {
+    if (!open) return
+
+    /**
+     * 关闭时机定在 **click（冒泡）**，而不是 mousedown。
+     *
+     * 这是本次修复的核心要点。原因见文件顶部那段注释：
+     * React 18 把 onClick 委托在 #root 上，事件顺序是
+     *     .menu-trigger 的 onClick（组件）  →  #root 的委托  →  document（这里）
+     * 若把关闭放在更早的 mousedown，它会抢在组件的 onClick 之前改掉 open，
+     * 让「点菜单名」这个动作读到过期状态。
+     *
+     * 关闭条件：**点击没有落在顶栏内部**。
+     * 顶栏_内部_的空白（菜单名之间的 padding、图标空隙）刻意**不关** ——
+     * 它离菜单名只差几像素，顺手关掉等于「手抖点偏 2px 菜单就没了」，更糟。
+     * 菜单项自己会在 onPick 里关闭；点顶栏之外的一切地方（正文、侧栏、状态栏）
+     * 都会冒泡到 document，在这里收起。
+     */
+    const onClick = (e: MouseEvent) => {
+      const inBar = Boolean(
+        barRef.current && e.target instanceof Node && barRef.current.contains(e.target)
+      )
+      if (inBar) return
+      setOpen(null)
+    }
+
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [open])
 
   useEffect(() => {
     // Alt+F / Alt+T / Alt+A 直接展开对应菜单；Esc 收起。
@@ -50,24 +99,23 @@ export default function MenuBar() {
   }, [])
 
 
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (barRef.current && !barRef.current.contains(e.target as Node)) {
-        setOpen(null)
-      }
-    }
-    // capture:true —— 菜单项里的 input 点击不该被误判为「点到外面」
-    document.addEventListener('mousedown', onDown, true)
-    return () => document.removeEventListener('mousedown', onDown, true)
-  }, [open])
-
   const run = (fn?: () => void) => {
     setOpen(null)
     fn?.()
   }
 
   const fileItems = useFileItems()
+
+  /**
+   * 菜单名点击：已开则关、未开则开。
+   *
+   * 读 openRef 而不是闭包里的 open —— state 更新是异步的，
+   * 同一次事件里两次 setOpen 的判断必须基于同一个真实值，否则会出现
+   * 「点一下该关却关了又开」这种自相矛盾的结果。
+   */
+  const toggle = (key: Exclude<MenuKey, null>) => {
+    setOpen(openRef.current === key ? null : key)
+  }
 
   return (
     <div className="menubar no-print" ref={barRef}>
@@ -76,7 +124,9 @@ export default function MenuBar() {
           label="文件"
           accelKey="F"
           active={open === 'file'}
-          onToggle={() => setOpen(open === 'file' ? null : 'file')}
+          anyOpen={open !== null}
+          onToggle={() => toggle('file')}
+          onHover={() => setOpen('file')}
         >
           <Items items={fileItems} onPick={run} />
         </Menu>
@@ -84,7 +134,9 @@ export default function MenuBar() {
           label="主题"
           accelKey="T"
           active={open === 'theme'}
-          onToggle={() => setOpen(open === 'theme' ? null : 'theme')}
+          anyOpen={open !== null}
+          onToggle={() => toggle('theme')}
+          onHover={() => setOpen('theme')}
         >
           <ThemeItems onPick={run} />
         </Menu>
@@ -92,7 +144,9 @@ export default function MenuBar() {
           label="关于"
           accelKey="A"
           active={open === 'about'}
-          onToggle={() => setOpen(open === 'about' ? null : 'about')}
+          anyOpen={open !== null}
+          onToggle={() => toggle('about')}
+          onHover={() => setOpen('about')}
         >
           <AboutItems onPick={run} />
         </Menu>
@@ -105,18 +159,30 @@ function Menu({
   label,
   accelKey,
   active,
+  anyOpen,
   onToggle,
+  onHover,
   children,
 }: {
   label: string
   /** 菜单名的记忆键，显示为「文件(F)」，Alt+F 可直接展开 */
   accelKey?: string
   active: boolean
+  /** 同级是否有菜单正展开。用来实现「先点开一个，再滑过另一个即切换」 */
+  anyOpen: boolean
   onToggle: () => void
+  onHover: () => void
   children: React.ReactNode
 }) {
   return (
-    <div className="menu-root">
+    <div
+      className="menu-root"
+      // 只有**已经展开着**某个菜单时，滑过才切换。
+      // 否则鼠标扫过顶栏就会不断弹菜单 —— 那不是用户要的。
+      onMouseEnter={() => {
+        if (anyOpen) onHover()
+      }}
+    >
       <button
         className={`menu-trigger${active ? ' open' : ''}`}
         onClick={onToggle}
