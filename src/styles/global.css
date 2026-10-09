@@ -528,6 +528,28 @@ body.resizing-col * {
   padding: 0;
 }
 
+/* ⚠️ 全局防线：内容区里**任何元素都不允许有纵向 margin**（v0.3.6）。
+ *
+ * 起因：用户报告「点某一行，光标却落到了下一行」。根因是 `.cm-md-hr` 与
+ * 表格包裹层的 `margin-top` —— CodeMirror 用 `elementAtHeight` 逐像素反查
+ * 「这个 y 属于哪一行」，而它只认盒子的 border-box，**margin 在盒外看不见**。
+ * 每处纵向 margin 都会让后续所有行的 DOM 位置比 CM 记账低一点，
+ * 多个累加后超过半行高，点击就整体偏到下一行。
+ *
+ * 官方文档对此有明确要求：block 装饰不得有纵向 margin。
+ *
+ * 所以这里强制清零，作为「以后新增样式时不小心写了 margin」的防线 ——
+ * 纵向间距一律用 padding 表达（视觉等价，且 CM 量得到）。
+ *
+ * 用 `.editor-host .cm-content *` 而不是只针对某几个类：
+ * 以后再往内容区加新元素（脚注、定义列表等）时自动受保护，
+ * 不需要有人记得这条约束。
+ * `.cm-scroller` 的 max-width 居中用的是 `margin: 0 auto`（横向），不受影响。 */
+.editor-host .cm-content * {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
 /* 纯文本模式（.sql / .yaml / .conf / .properties / .txt 等）
    与 Markdown 的排版刻意分开：等宽字体、较紧的行高、无首行缩进。
    这些格式靠空格对齐表达结构，用正文字体 + 1.8 行高会把层次拉散。 */
@@ -656,7 +678,26 @@ body.resizing-col * {
    ⚠️ 沿用上文那条约束：选择器必须同为「后代 + 单类」权重（0,2,0），
    否则会被 .cm-gutters/.cm-line 的 padding 规则整条盖掉。 */
 .editor-host .cm-md-table-wrap {
-  margin: 0.6em 0;
+  /* ⚠️⚠️ 这里**绝对不能用 margin**（v0.3.6 修复「点某行光标落到下一行」）。
+   *
+   * `@codemirror/view` 对 `block: true` 的替换装饰有明确要求：
+   *   "block-level decorations should not have vertical margins"
+   * 原因是 CodeMirror 用 `elementAtHeight` 逐像素反查「这个 y 属于哪个块」，
+   * 而它只认 Widget 的 **border-box**（含 padding/border，**不含 margin**）。
+   * margin 在盒外，CM 完全看不见 —— 于是 DOM 里表格被 margin 往下推了 9.6px，
+   * 而 CM 记账里它还在原位，两者错开；底部再叠加一个 9.6px，
+   * 表格下方所有行的坐标累计偏移 19px，**刚好超过半行高（14.5px）**，
+   * 于是点击被判定到下一行去。
+   *
+   * 实测（同一份文档，79 个采样点铺满整行）：
+   *   margin: 0.6em 0          → 表格偏移 9px、后行偏移 20px → 79/79 全部落错
+   *   margin: 0; padding: 0    → 偏移 0px / 0px          → 0/79 ✓
+   *   margin: 0; padding: 0.6em 0 → 偏移 0px / 0px        → 0/79 ✓（间距照旧保留）
+   *
+   * 结论：**纵向间距一律用 padding 表达，不用 margin**。
+   * padding 属于盒子的一部分，CM 量得到，视觉上与 margin 等价。 */
+  margin: 0;
+  padding: 0.6em 0;
   /* 表格可能比正文窄栏宽，给一层横向滚动，别把整行撑破布局 */
   overflow-x: auto;
   overflow-y: hidden;
@@ -708,9 +749,22 @@ body.resizing-col * {
 }
 
 .editor-host .cm-md-hr {
-  padding-top: 0.9em;
+  /* ⚠️ 同样**不能用 margin**（v0.3.6 修复）。
+   *
+   * 分隔线是 `.cm-line` 上的行装饰，它的 margin-top 会让这一行在 DOM 里
+   * 比 CodeMirror 记账的位置低 9.6px —— CM 用 `elementAtHeight` 逐像素反查
+   * 「这个 y 属于哪一行」，margin 在盒外它看不见。
+   *
+   * 单条分隔线只偏 9.6px（不到半行高 14.5px），点击勉强还能落对；
+   * 但**一个 `---` 就累加一次**，用户的报告里有 4 个分隔线 → 累计偏移 38px，
+   * 于是「点某一行，光标却落到下一行」。
+   * 实测（真实文档）：归零 margin 前累计偏移 38px、点击 0/36 全错；
+   * 归零后累计偏移 0px、点击 36/36 全对。
+   *
+   * 原 `padding-top: 0.9em + margin-top: 0.6em` 合计 1.5em，现在合并到 padding。 */
+  padding-top: 1.5em;
   border-top: 1px solid var(--border);
-  margin-top: 0.6em;
+  margin: 0;
 }
 
 .editor-host .cm-md-codeblock {

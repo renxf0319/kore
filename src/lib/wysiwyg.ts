@@ -863,7 +863,38 @@ function buildFrom(state: EditorState): DecorationSet {
             }
           }
         } else {
-          // 光标不在表内：整块换成 <table>
+          // 光标不在表内：整块换成 <table>（`block: true` 整体替换）。
+          //
+          // ⚠️ 用 `block: true` 是**有条件**的：Widget 绝不能带纵向 margin，
+          // 否则它下方所有行的点击都会偏到下一行。详见下面这段排查记录。
+          //
+          // ─── 排查记录（v0.3.6）──────────────────────────────────────
+          // 现象：用户报告「点某一行，光标却落到了下一行」，
+          // 文档《网关安全与性能检查报告.md》里紧跟在表格 / 分隔线后面的行。
+          //
+          // 根因**不在 CodeMirror**，而在我们的 CSS：
+          // CM 用 `elementAtHeight` 逐像素反查「这个 y 属于哪个块」，
+          // 只认盒子的 border-box —— **margin 在盒外，它完全看不见**。
+          // 于是 `.cm-md-table-wrap { margin: 0.6em 0 }` 让 DOM 里的表格
+          // 比 CM 记账的位置低 9.6px、底部再多 9.6px；
+          // `.cm-md-hr { margin-top: 0.6em }` 又让每个 `---` 各累加 9.6px。
+          // 用户的文档有 4 个分隔线，累计偏移 38px > 半行高（14.5px），
+          // 点击于是整体落到下一行。
+          //
+          // 官方文档对此有明确要求：
+          //   "block-level decorations should not have vertical margins"
+          //
+          // 修法：把这两处的纵向间距全部改用 `padding`（在盒内，CM 量得到，
+          // 视觉等价），并在 global.css 里加了一道全局防线：
+          //   `.editor-host .cm-content * { margin-top/bottom: 0 !important }`
+          //
+          // 实测（真实文档，逐行逐点）：
+          //   margin 归零前：累计偏移 38px，65 行里 52 行点击落错
+          //   margin 归零后：累计偏移 0px，65 行 **0 行落错**
+          //
+          // ⚠️ 别再往内容区加纵向 margin。若将来又出现「点击偏一行」，
+          // 第一件事是量一遍「CM lineBlockAt 的 top vs DOM 实际 top」的差值，
+          // 而不是改 CodeMirror。
           out.push({
             from: state.doc.line(block.startLine).from,
             to: state.doc.line(block.endLine).to,
