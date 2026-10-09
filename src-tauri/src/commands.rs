@@ -121,3 +121,141 @@ pub fn read_file(path: String) -> Result<String, String> {
 pub fn write_file(path: String, contents: String) -> Result<(), String> {
     fs::write(&path, contents).map_err(|e| format!("写入失败 {}: {}", path, e))
 }
+
+// ---------------------------------------------------------------------------
+// 文件树右键菜单用到的操作
+//
+// 全部遵循同一条原则：**能明确说清失败原因就说清**，不要把一个裸的
+// io error 丢给用户（「os error 183」没人看得懂）。
+// ---------------------------------------------------------------------------
+
+/// 目标已存在时的统一错误文案。新建文件/文件夹都先查这一条 ——
+/// 静默覆盖用户的文件是不可接受的，宁可报错让他改个名字。
+fn exists_err(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    format!("「{}」已存在，请换一个名字", name)
+}
+
+/// 新建空文件。
+///
+/// 用 `create_new(true)` 而不是 `write`：它在**打开时就**要求文件不存在，
+/// 因此连「检查完到写入之间被别的程序抢先创建」这种竞态也一并挡掉。
+#[tauri::command]
+pub fn create_file(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        return Err(exists_err(p));
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(p)
+        .map(|_| ())
+        .map_err(|e| format!("新建文件失败 {}: {}", path, e))
+}
+
+/// 新建目录。只建一层：上层目录必然存在（我们是从文件树里点的）。
+#[tauri::command]
+pub fn create_dir(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        return Err(exists_err(p));
+    }
+    fs::create_dir(p).map_err(|e| format!("新建文件夹失败 {}: {}", path, e))
+}
+
+/// 删除文件
+#[tauri::command]
+pub fn remove_file(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("「{}」已不存在（可能已被其它程序删除）", path));
+    }
+    if p.is_dir() {
+        return Err(format!("「{}」是文件夹，不能按文件删除", path));
+    }
+    fs::remove_file(p).map_err(|e| format!("删除失败 {}: {}", path, e))
+}
+
+/// 递归删除目录
+#[tauri::command]
+pub fn remove_dir(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("「{}」已不存在（可能已被其它程序删除）", path));
+    }
+    if !p.is_dir() {
+        return Err(format!("「{}」不是文件夹", path));
+    }
+    fs::remove_dir_all(p).map_err(|e| format!("删除失败 {}: {}", path, e))
+}
+
+/// 在系统文件管理器里定位这个路径：
+///  - 目录 → 直接打开它
+///  - 文件 → 打开它所在的目录并**选中**该文件
+///
+/// 为什么自己起进程而不用 opener 插件的 reveal：
+/// 插件的 `reveal_item_in_dir` 受前端 scope 约束（默认不放行任意绝对路径），
+/// 而这里只是本机文件管理器的一个定位动作，自己 spawn 更直接、行为也更可控。
+///
+/// ⚠️ 一律用 `spawn` 而不 `wait`：explorer.exe 在成功时也会返回非 0 退出码，
+/// 等它、解读它的返回值只会带来误报。
+#[tauri::command]
+pub fn reveal_in_explorer(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("「{}」已不存在", path));
+    }
+    let is_dir = p.is_dir();
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // 不弹黑色控制台窗口（explorer 本身是 GUI，但保险起见）
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut cmd = std::process::Command::new("explorer");
+        if is_dir {
+            cmd.arg(&path);
+        } else {
+            // `/select,<完整路径>` 必须作为**一个**参数传入，中间不能有空格
+            cmd.arg(format!("/select,{}", path));
+        }
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开文件管理器失败: {}", e))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = std::process::Command::new("open");
+        if is_dir {
+            cmd.arg(&path);
+        } else {
+            cmd.arg("-R").arg(&path); // -R = 在 Finder 中显示
+        }
+        cmd.spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开访达失败: {}", e))
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // Linux 没有统一的「选中文件」能力，退化为打开所在目录
+        let target = if is_dir {
+            path.clone()
+        } else {
+            p.parent()
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone())
+        };
+        std::process::Command::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开文件管理器失败: {}", e))
+    }
+}

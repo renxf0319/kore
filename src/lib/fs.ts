@@ -344,6 +344,64 @@ export interface OpenedFile {
   content: string
 }
 
+// ----------------------- 增删 / 定位（两种模式的共用语义） -----------------------
+
+/**
+ * 把「父目录虚拟路径 + 名字」拼成完整路径。
+ * 两种模式的路径分隔符不同：桌面端是 `\`，浏览器端是 `/`（虚拟路径）。
+ * 生成与解析必须共用这一条规则，否则浏览器端展开子目录会找不到目录。
+ */
+function joinPath(parent: string, name: string): string {
+  const sep = isTauri ? '\\' : '/'
+  return parent.endsWith(sep) ? `${parent}${name}` : `${parent}${sep}${name}`
+}
+
+/** 浏览器模式：定位父目录句柄（统一走 relParts，保证与列表生成规则一致） */
+async function browserParentOf(parentPath: string): Promise<FileSystemDirectoryHandle> {
+  if (!rootHandle) throw new Error('未选择文件夹')
+  await ensurePerm()
+  const root = rootHandle
+  return dirAt(root, relParts(root, parentPath))
+}
+
+async function browserEntryExists(
+  dir: FileSystemDirectoryHandle,
+  name: string
+): Promise<boolean> {
+  for await (const [n] of dir.entries()) if (n === name) return true
+  return false
+}
+
+/** 浏览器模式：新建文件后立即落盘（内容为空），与桌面端语义一致 */
+async function browserCreateFile(parentPath: string, name: string): Promise<void> {
+  const dir = await browserParentOf(parentPath)
+  if (await browserEntryExists(dir, name)) throw new Error(`「${name}」已存在，请换一个名字`)
+  const fh = await dir.getFileHandle(name, { create: true })
+  await writeLoose(fh, '')
+}
+
+async function browserCreateDir(parentPath: string, name: string): Promise<void> {
+  const dir = await browserParentOf(parentPath)
+  if (await browserEntryExists(dir, name)) throw new Error(`「${name}」已存在，请换一个名字`)
+  await dir.getDirectoryHandle(name, { create: true })
+}
+
+async function browserRemove(parentPath: string, name: string, isDir: boolean): Promise<void> {
+  const dir = await browserParentOf(parentPath)
+  if (!(await browserEntryExists(dir, name))) {
+    throw new Error(`「${name}」已不存在（可能已被其它程序删除）`)
+  }
+  await dir.removeEntry(name, isDir ? { recursive: true } : undefined)
+}
+
+/** 浏览器模式：把「父目录 + 名字」拆出来 —— 与 joinPath 的拼接规则互为逆运算 */
+function splitPath(full: string): { parent: string; name: string } {
+  // 两种分隔符都认（桌面端 `\`、浏览器虚拟路径 `/`），取靠后的那个
+  const cut = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/'))
+  if (cut <= 0) return { parent: '', name: full }
+  return { parent: full.slice(0, cut), name: full.slice(cut + 1) }
+}
+
 // ----------------------- 统一 API -----------------------
 export const fsApi = {
   async pickFolder(): Promise<string | null> {
@@ -381,6 +439,50 @@ export const fsApi = {
     if (isTauri) return tauriInvoke<void>('write_file', { path, contents: content })
     if (!rootHandle && !looseFiles.has(path)) throw new Error('未选择文件夹或文件')
     return browserWrite(path, content)
+  },
+
+  /**
+   * 新建文件（空内容）并**立刻落盘**，返回新文件的完整路径。
+   * 需求原话是「在 Kore 中的文件操作，在电脑要同步」—— 所以这是真建文件，
+   * 而不是先建个内存里的占位、等保存时才写盘。
+   */
+  async createFile(parentPath: string, name: string): Promise<string> {
+    const full = joinPath(parentPath, name)
+    if (isTauri) {
+      await tauriInvoke<void>('create_file', { path: full })
+      return full
+    }
+    await browserCreateFile(parentPath, name)
+    return full
+  },
+
+  async createDir(parentPath: string, name: string): Promise<string> {
+    const full = joinPath(parentPath, name)
+    if (isTauri) {
+      await tauriInvoke<void>('create_dir', { path: full })
+      return full
+    }
+    await browserCreateDir(parentPath, name)
+    return full
+  },
+
+  /** 删除文件或目录（目录递归）。传完整路径，内部自己拆出父目录与名字。 */
+  async remove(path: string, isDir: boolean): Promise<void> {
+    if (isTauri) {
+      return tauriInvoke<void>(isDir ? 'remove_dir' : 'remove_file', { path })
+    }
+    const { parent, name } = splitPath(path)
+    return browserRemove(parent, name, isDir)
+  },
+
+  /**
+   * 在系统文件管理器里定位（文件=选中，目录=打开）。
+   * 浏览器模式没有对应能力，返回 false 由调用方给出提示。
+   */
+  async reveal(path: string): Promise<boolean> {
+    if (!isTauri) return false
+    await tauriInvoke<void>('reveal_in_explorer', { path })
+    return true
   },
 
   // 打开单个文件（不要求先有工作区）

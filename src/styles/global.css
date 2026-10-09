@@ -452,54 +452,27 @@ body.resizing-col * {
   font-weight: 600;
 }
 
-/* 「显示全部文件」开关：贴在文件树底部，默认状态低调、不与文件名抢视线。
-   勾选框保留原生 appearance —— 系统自绘的勾选框在各平台观感最自然，
-   强行自定义反而容易在暗色下糊成一片。 */
-/* 「显示全部文件」开关：**固定在文件树区域底部**，只有一只眼睛。
- *
- * 三条约束（每条都对应一个真实踩过的坑）：
- *  1. `flex-shrink: 0` —— 它是 .tree-pane 的最后一个子项，
- *     不写会被上方滚动区的 min-height 挤压甚至整条消失。
- *  2. `width: 100%` + `justify-content: center` —— 去掉勾选框和文字后
- *     热区只剩一个 20px 的图标，必须把整条底栏都变成点击区，
- *     否则「点眼睛」这个动作本身就很难点中。
- *  3. `border-top` 画在底栏**上沿** —— 它是「树到此为止」的边界线；
- *     若把 border 放在元素内部会随滚动内容一起动，失去分界作用。
- */
-.tree-toggle {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 7px 0;
-  border-top: 1px solid var(--border);
+/* 文件树右键浮层。
+ * 用 fixed 定位（不是 absolute）：文件树自己是滚动容器，
+ * absolute 会被它的 overflow 裁掉，也会随滚动跑偏。
+ * 视觉上刻意复用 .menu-item / .menu-sep，与顶栏下拉菜单保持同一套观感。 */
+.ctx-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 176px;
+  padding: 4px;
   background: var(--bg-elev);
-  color: var(--fg-muted);
-  /* 开关类控件：箭头光标（与顶栏菜单、页签保持一致） */
-  cursor: default;
-  user-select: none;
-  transition: color 0.12s, background 0.12s;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
 }
-.tree-toggle:hover {
-  color: var(--fg);
-  background: var(--bg-sunken);
+/* 危险项（删除）：文字染红，hover 用红色底，避免和普通项混淆 */
+.ctx-menu .menu-item.danger {
+  color: var(--danger);
 }
-/* 开启态：眼睛换成 Eye 且染成强调色，一眼能看出「现在是全量模式」 */
-.tree-toggle[aria-pressed='true'] {
-  color: var(--accent);
-}
-.tree-toggle:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -2px;
-}
-/* 白名单之外的文件：可见但明确「不可用」。
-   不用 display:none —— 用户需要知道文件存在，点一下得到明确提示，
-   比「文件凭空消失」更好排查。 */
-.tree-row.file.unsupported {
-  color: var(--fg-muted);
-  cursor: not-allowed;
-  opacity: 0.6;
+.ctx-menu .menu-item.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 .tree-row.file.unsupported:hover {
   background: var(--bg-sunken);
@@ -1003,6 +976,41 @@ body.resizing-col * {
 }
 .modal-btn.ghost {
   background: transparent;
+}
+/* 危险动作按钮（删除）：红色描边 + 红色文字，和「确定」拉开距离 */
+.modal-btn.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.modal-btn.danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+/* 次要说明（如「不写扩展名会自动补 .md」） */
+.modal-hint {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin: -4px 0 10px;
+}
+/* 弹窗里的输入框（新建文件/文件夹的名字）。
+   ⚠️ 必须显式写 background/color —— 浏览器默认输入框是白底黑字，
+   在暗色主题下会变成一块刺眼的白斑。 */
+.modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 18px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  outline: none;
+}
+.modal-input:focus {
+  border-color: var(--accent);
 }
 
 /* ---------------- 状态栏 ---------------- */

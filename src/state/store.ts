@@ -85,8 +85,6 @@ interface AppState {
   rootName: string | null
   expanded: Record<string, boolean>
   dirs: Record<string, { name: string; path: string; isDir: boolean }[]>
-  /** 是否显示白名单之外的其它文件（默认 false：只列出可编辑的纯文本类型） */
-  showAllFiles: boolean
   tabs: OpenTab[]
   /** 当前激活标签的 id（不是 path —— 未命名文档没有 path） */
   active: string | null
@@ -110,7 +108,6 @@ interface AppState {
   setSidebar: (open: boolean) => void
   setSidebarW: (w: number) => void
   setJumpLine: (n: number | null) => void
-  setShowAllFiles: (v: boolean) => void
 
   newDoc: () => void
   openFileDialog: () => Promise<void>
@@ -118,6 +115,16 @@ interface AppState {
   loadDir: (path: string) => Promise<void>
   toggleExpand: (path: string) => void
   openFile: (path: string, name: string) => Promise<void>
+  /** 重新读取某个已加载目录；列表没变化时不触发任何渲染 */
+  refreshDir: (path: string) => Promise<void>
+  /** 刷新所有「已展开」的目录（窗口获得焦点 / 定时轮询时调用） */
+  refreshTree: () => Promise<void>
+  /** 在 parentPath 下新建文件或文件夹，并**立刻落盘** */
+  createEntry: (parentPath: string, name: string, isDir: boolean) => Promise<void>
+  /** 删除文件或目录（目录递归），并同步磁盘 */
+  deleteEntry: (path: string, isDir: boolean, parentPath: string) => Promise<void>
+  /** 在系统文件管理器里定位该路径 */
+  revealEntry: (path: string) => Promise<void>
   closeDoc: () => void
   updateContent: (id: string, content: string) => void
   save: () => Promise<void>
@@ -147,17 +154,6 @@ const SIDEBAR_W_MAX = 520
 const SIDEBAR_W_DEFAULT = 196
 const SIDEBAR_W_KEY = 'kore-sidebar-w'
 
-/** 「显示全部文件」开关的持久化 key */
-const SHOW_ALL_KEY = 'kore-show-all-files'
-
-function readShowAll(): boolean {
-  try {
-    return localStorage.getItem(SHOW_ALL_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
 function clampSidebarW(w: number): number {
   return Math.round(Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, w)))
 }
@@ -183,6 +179,23 @@ function single(doc: OpenTab | null): Pick<AppState, 'tabs' | 'active'> {
 }
 
 /**
+ * 两份目录列表是否「等价」—— 只看名字与是否目录，不看 path
+ * （path 由名字推导，名字相同则 path 必然相同）。
+ *
+ * 用途见 refreshDir：轮询刷新时，列表没变就绝不 setState。
+ */
+function sameList(
+  a: { name: string; isDir: boolean }[],
+  b: { name: string; isDir: boolean }[]
+): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].name !== b[i].name || a[i].isDir !== b[i].isDir) return false
+  }
+  return true
+}
+
+/**
  * 造一个空的未命名文档（Typora 启动时的样子）。
  * `id` 用时间戳 + 递增序号，保证同一毫秒内连续新建也不会撞 key。
  */
@@ -204,7 +217,6 @@ export const useStore = create<AppState>((set, get) => ({
   rootName: null,
   expanded: {},
   dirs: {},
-  showAllFiles: readShowAll(),
   tabs: [],
   active: null,
   ready: false,
@@ -322,19 +334,6 @@ export const useStore = create<AppState>((set, get) => ({
     set({ jumpLine: n })
   },
 
-  setShowAllFiles(v) {
-    set({ showAllFiles: v })
-    try {
-      localStorage.setItem(SHOW_ALL_KEY, v ? '1' : '0')
-    } catch {
-      /* 存不上不影响本次会话使用 */
-    }
-    // dirs 里缓存的是过滤后的结果，切换后必须重读，否则开关看起来「没反应」。
-    // 只重读已经加载过的目录（值可能为 null 表示正在加载，跳过避免并发覆盖）。
-    const loaded = Object.keys(get().dirs).filter((p) => get().dirs[p] !== undefined)
-    for (const p of loaded) void get().loadDir(p)
-  },
-
   // --- 未保存拦截 -----------------------------------------------------------
   // 所有会「丢弃当前文档」的动作（新建/打开/关闭）都先过这里。
   // 有未保存改动时把动作挂起，交给对话框的「保存 / 放弃 / 取消」决定。
@@ -416,13 +415,10 @@ export const useStore = create<AppState>((set, get) => ({
   async loadDir(path) {
     try {
       const list = await fsApi.listDir(path)
-      // 只展示受支持的纯文本类型（目录始终保留，否则无法进入子目录）。
-      // 关掉「显示全部文件」时，白名单外的条目直接不出现在树里 ——
-      // 让用户点到一个 .class / .png 只会得到一句「不支持」，不如根本不列。
-      const showAll = get().showAllFiles
-      const visible = showAll
-        ? list
-        : list.filter((n) => n.isDir || isSupportedFile(n.name))
+      // 只展示受支持的纯文本类型；目录始终保留，否则无法进入子目录。
+      // 白名单外的条目（.class / .png / .jar）**根本不列出来** ——
+      // 列出来再给一句「不支持」，不如不让人点。
+      const visible = list.filter((n) => n.isDir || isSupportedFile(n.name))
       set((s) => ({ dirs: { ...s.dirs, [path]: visible }, expanded: { ...s.expanded, [path]: true } }))
     } catch (e) {
       const msg = errText(e)
@@ -437,6 +433,87 @@ export const useStore = create<AppState>((set, get) => ({
         return
       }
       set({ notice: { kind: 'error', text: `读取目录失败：${msg}` } })
+    }
+  },
+
+  /**
+   * 静默刷新：只更新 dirs[path]，**不碰 expanded**、**列表没变就不 setState**。
+   *
+   * 最后一条是关键。这个函数会被定时轮询调用（见 App.tsx 的同步 effect），
+   * 若无脑写入新数组，React 会周期性重建整棵子树的 DOM ——
+   * 而 click 事件要求 mousedown 与 mouseup 落在同一个元素上，
+   * DOM 一旦重建，用户按下时还在、松手时已被替换，浏览器就不派发 click。
+   * 历史上的「有些行点不进去、要点两三次」正是这么来的（见 FileTree 的模块级注释）。
+   */
+  async refreshDir(path) {
+    try {
+      const list = await fsApi.listDir(path)
+      const visible = list.filter((n) => n.isDir || isSupportedFile(n.name))
+      const prev = get().dirs[path]
+      if (prev && sameList(prev, visible)) return
+      set((s) => ({ dirs: { ...s.dirs, [path]: visible } }))
+    } catch {
+      // 轮询期间的读取失败不打扰用户：目录可能刚被删掉、或正在被移动。
+      // 真正由用户手势触发的读取走 loadDir，那里才需要给出提示。
+    }
+  },
+
+  async refreshTree() {
+    // 只刷新「已展开」的目录 —— 折叠着的内容用户看不见，读了也是白花钱。
+    const paths = Object.keys(get().dirs).filter((p) => get().expanded[p])
+    await Promise.all(paths.map((p) => get().refreshDir(p)))
+  },
+
+  async createEntry(parentPath, name, isDir) {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    // 只拦路径分隔符与各平台通用的非法字符；其余交给系统报错
+    // （不同文件系统的规则不一样，硬编一套规则只会误伤合法名字）。
+    if (/[\\/:*?"<>|]/.test(trimmed)) {
+      set({ notice: { kind: 'error', text: '名称不能包含 \\ / : * ? " < > | 这些字符' } })
+      return
+    }
+    // 新建文件默认 Markdown：用户没写扩展名就补 .md（需求：默认新增 md）
+    const finalName =
+      isDir || /\.[^./\\]+$/.test(trimmed) ? trimmed : `${trimmed}.md`
+    try {
+      const full = isDir
+        ? await fsApi.createDir(parentPath, finalName)
+        : await fsApi.createFile(parentPath, finalName)
+      await get().loadDir(parentPath)
+      // 新建完直接打开它 —— 「点了新建就想往里写」是绝大多数人的预期
+      if (!isDir) await get().openFile(full, finalName)
+    } catch (e) {
+      set({ notice: { kind: 'error', text: errText(e) } })
+    }
+  },
+
+  async deleteEntry(path, isDir, parentPath) {
+    const name = rootNameOf(path)
+    try {
+      await fsApi.remove(path, isDir)
+      // 删的正好是当前编辑的文件 → 立刻收走，不要留一个指向不存在文件的标签
+      if (get().activeTab()?.path === path) set(single(makeBlank()))
+      await get().loadDir(parentPath)
+      set({ notice: { kind: 'info', text: `已删除「${name}」` } })
+    } catch (e) {
+      set({ notice: { kind: 'error', text: `删除「${name}」失败：${errText(e)}` } })
+    }
+  },
+
+  async revealEntry(path) {
+    try {
+      const ok = await fsApi.reveal(path)
+      if (!ok) {
+        set({
+          notice: {
+            kind: 'info',
+            text: '浏览器模式打不开系统的文件管理器，请用桌面版或在资源管理器里手动定位',
+          },
+        })
+      }
+    } catch (e) {
+      set({ notice: { kind: 'error', text: `打开文件位置失败：${errText(e)}` } })
     }
   },
 

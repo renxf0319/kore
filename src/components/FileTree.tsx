@@ -1,15 +1,8 @@
-import {
-  ChevronRight,
-  ChevronDown,
-  FileText,
-  Folder,
-  FolderOpen,
-  Eye,
-  EyeOff,
-} from 'lucide-react'
+import { useState } from 'react'
+import { ChevronRight, ChevronDown, FileText, Folder, FolderOpen } from 'lucide-react'
 import { useStore } from '../state/store'
 import type { FileNode } from '../lib/types'
-import { isSupportedFile } from '../lib/filetype'
+import { ContextMenu, ConfirmDialog, NameDialog, type MenuEntry } from './TreeMenu'
 
 /**
  * 单个目录 / 文件节点。
@@ -35,7 +28,26 @@ import { isSupportedFile } from '../lib/filetype'
  */
 const MAX_INDENT_DEPTH = 5
 
-function TreeNode({ node, depth = 1 }: { node: FileNode; depth?: number }) {
+/** 右键菜单的目标：路径、名字、是不是目录，以及它所在的父目录 */
+export interface MenuTarget {
+  path: string
+  name: string
+  isDir: boolean
+  parent: string
+}
+
+function TreeNode({
+  node,
+  depth = 1,
+  parentPath,
+  onMenu,
+}: {
+  node: FileNode
+  depth?: number
+  /** 本节点所在目录的路径 —— 「在此处新建」要用它 */
+  parentPath: string
+  onMenu: (e: React.MouseEvent, target: MenuTarget) => void
+}) {
   const isOpen = useStore((s) => Boolean(s.expanded[node.path]))
   // 只订阅「当前激活文档的路径」这一个原始值，而不是整个 tabs 数组：
   // 文档内容每次按键都会变，订阅整个数组会让所有可见节点跟着重渲染。
@@ -51,6 +63,12 @@ function TreeNode({ node, depth = 1 }: { node: FileNode; depth?: number }) {
   // CSS 变量走内联 style：缩进要按**封顶后的**深度算，所以只能在 JS 里夹。
   const indent = { '--d': Math.min(depth, MAX_INDENT_DEPTH) } as React.CSSProperties
 
+  const onCtx = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation() // 别让事件冒到容器上被当成「点在空白处」
+    onMenu(e, { path: node.path, name: node.name, isDir: node.isDir, parent: parentPath })
+  }
+
   if (node.isDir) {
     return (
       <div className="tree-node">
@@ -58,6 +76,7 @@ function TreeNode({ node, depth = 1 }: { node: FileNode; depth?: number }) {
           className="tree-row"
           style={indent}
           onClick={() => toggleExpand(node.path)}
+          onContextMenu={onCtx}
           role="treeitem"
           aria-expanded={isOpen}
           tabIndex={0}
@@ -75,7 +94,13 @@ function TreeNode({ node, depth = 1 }: { node: FileNode; depth?: number }) {
         {isOpen && (
           <div className="tree-children" role="group">
             {(children || []).map((c) => (
-              <TreeNode key={c.path} node={c} depth={depth + 1} />
+              <TreeNode
+                key={c.path}
+                node={c}
+                depth={depth + 1}
+                parentPath={node.path}
+                onMenu={onMenu}
+              />
             ))}
           </div>
         )}
@@ -83,18 +108,16 @@ function TreeNode({ node, depth = 1 }: { node: FileNode; depth?: number }) {
     )
   }
 
-  // showAllFiles 关闭时 store 已经过滤过了；这里再判一次是为了
-  // 「显示全部文件」打开后的灰显样式，两条渲染路径共用同一套判定。
-  const supported = isSupportedFile(node.name)
   return (
     <div
-      className={`tree-row file${isActive ? ' active' : ''}${supported ? '' : ' unsupported'}`}
+      className={`tree-row file${isActive ? ' active' : ''}`}
       style={indent}
       onClick={() => void openFile(node.path, node.name)}
+      onContextMenu={onCtx}
       role="treeitem"
       aria-selected={isActive}
       tabIndex={0}
-      title={supported ? node.name : `${node.name}（暂不支持打开）`}
+      title={node.name}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
@@ -110,10 +133,13 @@ function TreeNode({ node, depth = 1 }: { node: FileNode; depth?: number }) {
 
 // 左侧栏「文件」页签：工作区目录树（懒加载）
 //
-// 展示规则：默认**只列出受支持的纯文本类型**（见 lib/filetype.ts）。
-// 目录永远保留 —— 否则用户没法进入子目录，也就没法找到里面支持的文件。
-// 勾上「显示全部文件」后，未支持的条目会以灰色 + 禁止光标出现，
-// 点下去得到一句明确的「暂不支持打开 xxx」，而不是报错或乱码。
+// 展示规则：**只列出受支持的纯文本类型**（见 lib/filetype.ts），目录永远保留
+// —— 否则用户没法进入子目录，也就没法找到里面支持的文件。
+// 白名单外的条目（.class / .png / .jar）根本不列出来：让用户点到再告诉他
+// 「不支持」，不如不让他点。（原先有个「显示全部文件」的眼睛开关，已按需求去掉。）
+//
+// 右键菜单：新建文件（默认 .md）/ 新建文件夹 / 打开文件位置 / 删除。
+// 新建与删除都**直接落盘**，不是只改内存 —— 见 store 的 createEntry / deleteEntry。
 export function FileTree() {
   const rootPath = useStore((s) => s.rootPath)
   const rootName = useStore((s) => s.rootName)
@@ -121,8 +147,16 @@ export function FileTree() {
   const rootChildren = useStore((s) => (s.rootPath ? s.dirs[s.rootPath] : undefined))
   const toggleExpand = useStore((s) => s.toggleExpand)
   const openFolder = useStore((s) => s.openFolder)
-  const showAllFiles = useStore((s) => s.showAllFiles)
-  const setShowAllFiles = useStore((s) => s.setShowAllFiles)
+  const createEntry = useStore((s) => s.createEntry)
+  const deleteEntry = useStore((s) => s.deleteEntry)
+  const revealEntry = useStore((s) => s.revealEntry)
+
+  // 右键菜单：坐标 + 目标
+  const [menu, setMenu] = useState<(MenuTarget & { x: number; y: number }) | null>(null)
+  // 当前弹窗：新建文件 / 新建文件夹 / 删除确认
+  const [dialog, setDialog] = useState<
+    { kind: 'file' | 'dir' | 'delete'; parent: string; target?: MenuTarget } | null
+  >(null)
 
   if (!rootPath) {
     // 按需求：空态只留一个「打开文件夹」按钮，不做任何文字说明。
@@ -136,16 +170,60 @@ export function FileTree() {
     )
   }
 
+  const openMenu = (e: React.MouseEvent, target: MenuTarget) => {
+    setMenu({ ...target, x: e.clientX, y: e.clientY })
+  }
+
+  // 根目录行：右键目标就是根目录本身，「新建」都建在工作区里
+  const rootTarget: MenuTarget = {
+    path: rootPath,
+    name: rootName ?? rootPath,
+    isDir: true,
+    parent: rootPath,
+  }
+
+  // 容器上的右键 = 点在了空白处 → 同样以工作区根目录为目标
+  const onBlankContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    openMenu(e, rootTarget)
+  }
+
+  const menuItems: MenuEntry[] = menu
+    ? [
+        {
+          label: '新建文件',
+          onSelect: () =>
+            // 右键目录 → 建在它里面；右键文件 → 建在它旁边
+            setDialog({ kind: 'file', parent: menu.isDir ? menu.path : menu.parent }),
+        },
+        {
+          label: '新建文件夹',
+          onSelect: () =>
+            setDialog({ kind: 'dir', parent: menu.isDir ? menu.path : menu.parent }),
+        },
+        { label: '打开文件位置', sep: true, onSelect: () => void revealEntry(menu.path) },
+        {
+          label: '删除',
+          sep: true,
+          danger: true,
+          onSelect: () => setDialog({ kind: 'delete', parent: menu.parent, target: menu }),
+        },
+      ]
+    : []
+
   return (
-    // ⚠️ 结构说明：`.tree-pane` = 滚动区 + 固定底栏 的竖向 flex 容器。
-    // 开关必须住在**滚动区之外**，否则它会被长文件树顶出视口，
-    // 也会随目录展开 / 折叠上下跳动 —— 位置不固定的功能开关等于没有。
+    // 结构说明：滚动区占满剩余高度；原先贴在底部的「显示全部文件」开关已移除。
     <div className="tree-pane">
-      <div className="tree-scroll">
+      <div className="tree-scroll" onContextMenu={onBlankContextMenu}>
         <div className="tree" role="tree">
           <div
             className="tree-row"
             onClick={() => toggleExpand(rootPath)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              openMenu(e, rootTarget)
+            }}
             role="treeitem"
             aria-expanded={rootOpen}
             tabIndex={0}
@@ -163,29 +241,71 @@ export function FileTree() {
           {rootOpen && (
             <div className="tree-children" role="group">
               {(rootChildren || []).map((c) => (
-                <TreeNode key={c.path} node={c} />
+                <TreeNode key={c.path} node={c} parentPath={rootPath} onMenu={openMenu} />
               ))}
             </div>
           )}
         </div>
       </div>
-      {/* 「显示全部文件」：去掉勾选框，只留眼睛图标。
-          眼睛本身就是开关（Eye / EyeOff 两种状态即状态指示），
-          含义靠 title / aria-label 说明 —— 图标比勾选框更省横向空间，
-          且在 140px 的窄侧栏里也不会把文件名挤掉。 */}
-      <button
-        className="tree-toggle"
-        onClick={() => setShowAllFiles(!showAllFiles)}
-        title={
-          showAllFiles
-            ? '正在显示全部文件 · 点击改为只显示可编辑的文本类型'
-            : '正在只显示可编辑的文本类型 · 点击显示全部文件'
-        }
-        aria-label="显示全部文件"
-        aria-pressed={showAllFiles}
-      >
-        {showAllFiles ? <Eye size={16} /> : <EyeOff size={16} />}
-      </button>
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+
+      {dialog?.kind === 'file' && (
+        <NameDialog
+          title="新建文件"
+          hint="不写扩展名会自动补 .md"
+          defaultValue="未命名.md"
+          confirmText="创建"
+          onCancel={() => setDialog(null)}
+          onConfirm={(name) => {
+            const parent = dialog.parent
+            setDialog(null)
+            void createEntry(parent, name, false)
+          }}
+        />
+      )}
+
+      {dialog?.kind === 'dir' && (
+        <NameDialog
+          title="新建文件夹"
+          defaultValue="新建文件夹"
+          confirmText="创建"
+          onCancel={() => setDialog(null)}
+          onConfirm={(name) => {
+            const parent = dialog.parent
+            setDialog(null)
+            void createEntry(parent, name, true)
+          }}
+        />
+      )}
+
+      {dialog?.kind === 'delete' && dialog.target && (
+        <ConfirmDialog
+          title={dialog.target.isDir ? '删除文件夹' : '删除文件'}
+          confirmText="删除"
+          body={
+            dialog.target.isDir ? (
+              <>
+                将删除文件夹「{dialog.target.name}」及其全部内容。
+                磁盘上的文件会一起删除，且无法撤销。
+              </>
+            ) : (
+              <>
+                将删除文件「{dialog.target.name}」。磁盘上的文件会一起删除，且无法撤销。
+              </>
+            )
+          }
+          onCancel={() => setDialog(null)}
+          onConfirm={() => {
+            const t = dialog.target as MenuTarget
+            const parent = dialog.parent
+            setDialog(null)
+            void deleteEntry(t.path, t.isDir, parent)
+          }}
+        />
+      )}
     </div>
   )
 }

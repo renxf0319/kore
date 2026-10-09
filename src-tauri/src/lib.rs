@@ -9,7 +9,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::read_dir,
             commands::read_file,
-            commands::write_file
+            commands::write_file,
+            // 文件树右键菜单（新增 / 删除 / 在文件管理器中定位）
+            commands::create_file,
+            commands::create_dir,
+            commands::remove_file,
+            commands::remove_dir,
+            commands::reveal_in_explorer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
