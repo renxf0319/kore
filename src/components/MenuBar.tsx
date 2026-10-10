@@ -25,6 +25,8 @@ interface Item {
 // 而不能放在更早的 mousedown 里（否则会抢在 onClick 之前把状态改掉）。
 //
 // Typora 式顶栏：文件 / 主题 / 关于。点击展开，点击任意处或 Esc 收起。
+// 「任意处」是字面意思：菜单名与已展开的浮层内部除外，**其余一律收起**，
+// 包含顶栏自身的留白 —— 见下面关闭条件的注释。
 // 已展开时，鼠标滑过其他菜单名会**直接切换**（无需再点一次）。
 export default function MenuBar() {
   const [open, setOpen] = useState<MenuKey>(null)
@@ -55,17 +57,24 @@ export default function MenuBar() {
      * 若把关闭放在更早的 mousedown，它会抢在组件的 onClick 之前改掉 open，
      * 让「点菜单名」这个动作读到过期状态。
      *
-     * 关闭条件：**点击没有落在顶栏内部**。
-     * 顶栏_内部_的空白（菜单名之间的 padding、图标空隙）刻意**不关** ——
-     * 它离菜单名只差几像素，顺手关掉等于「手抖点偏 2px 菜单就没了」，更糟。
-     * 菜单项自己会在 onPick 里关闭；点顶栏之外的一切地方（正文、侧栏、状态栏）
-     * 都会冒泡到 document，在这里收起。
+     * 关闭条件：**点击必须落在「某个菜单名」或「已展开的浮层」内部**才保留菜单，
+     * 其余一切地方（包括顶栏自己的空白）都收起。
+     *
+     * ⚠️ 判据**不能**写成「点击落在整个顶栏内就不关」—— 那样顶栏自身的空白
+     * （左内边距、菜单名之间那几像素的 gap、上下留白）都成了点不掉的死区：
+     * 用户展开菜单后想「随手点一下旁边关掉」，正好点在这些缝里，菜单纹丝不动，
+     * 只能去点正文才收得起来。实测顶栏内左内边距与菜单名间 gap 两处全部踩中。
+     * 顶栏一共才 33px 高、菜单名之间只有 2px，这几处空白毫无「可点意义」，
+     * 让它们承担「保持菜单展开」的语义纯属误伤。
      */
     const onClick = (e: MouseEvent) => {
-      const inBar = Boolean(
-        barRef.current && e.target instanceof Node && barRef.current.contains(e.target)
-      )
-      if (inBar) return
+      const t = e.target
+      if (!(t instanceof Element)) return
+      // 菜单名本身：交给它的 onClick 做开/关切换，这里不插手
+      if (t.closest('.menu-trigger')) return
+      // 已展开的浮层（一级 / 二级）内部：点菜单项由 onPick 负责关闭；
+      // 点在浮层的 padding 上则保持展开（用户在菜单里，不该被误关）
+      if (t.closest('.menu-pop')) return
       setOpen(null)
     }
 

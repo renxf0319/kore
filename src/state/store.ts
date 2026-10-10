@@ -118,8 +118,8 @@ interface AppState {
   loadDir: (path: string) => Promise<void>
   toggleExpand: (path: string) => void
   openFile: (path: string, name: string) => Promise<void>
-  /** 重新读取某个已加载目录；列表没变化时不触发任何渲染 */
-  refreshDir: (path: string) => Promise<void>
+  /** 重新读取某个已加载目录；列表没变化时不触发任何渲染。返回「该目录是否已不存在」 */
+  refreshDir: (path: string) => Promise<boolean>
   /** 刷新所有「已展开」的目录（窗口获得焦点 / 定时轮询时调用） */
   refreshTree: () => Promise<void>
   /** 在 parentPath 下新建文件或文件夹，并**立刻落盘** */
@@ -447,24 +447,53 @@ export const useStore = create<AppState>((set, get) => ({
    * 而 click 事件要求 mousedown 与 mouseup 落在同一个元素上，
    * DOM 一旦重建，用户按下时还在、松手时已被替换，浏览器就不派发 click。
    * 历史上的「有些行点不进去、要点两三次」正是这么来的（见 FileTree 的模块级注释）。
+   *
+   * 返回目录是否**已经不存在**（读取失败）。调用方（refreshTree）据此把它的
+   * 缓存清掉 —— 目录被外部删掉后，留着 dirs[path] 会让它下次被「重新展开」时
+   * 先闪出一份过期的旧列表。
    */
   async refreshDir(path) {
     try {
       const list = await fsApi.listDir(path)
       const visible = list.filter((n) => n.isDir || isSupportedFile(n.name))
       const prev = get().dirs[path]
-      if (prev && sameList(prev, visible)) return
+      if (prev && sameList(prev, visible)) return false
       set((s) => ({ dirs: { ...s.dirs, [path]: visible } }))
+      return false
     } catch {
       // 轮询期间的读取失败不打扰用户：目录可能刚被删掉、或正在被移动。
       // 真正由用户手势触发的读取走 loadDir，那里才需要给出提示。
+      // 但要**清掉本地缓存**，否则那个已消失的目录会一直挂在 expanded 里，
+      // 每次轮询都白读一次、且它下面的旧列表还会留在内存中。
+      return true
     }
   },
 
   async refreshTree() {
     // 只刷新「已展开」的目录 —— 折叠着的内容用户看不见，读了也是白花钱。
-    const paths = Object.keys(get().dirs).filter((p) => get().expanded[p])
-    await Promise.all(paths.map((p) => get().refreshDir(p)))
+    const state = get()
+    const paths = Object.keys(state.dirs).filter((p) => state.expanded[p])
+    const gone: string[] = []
+    await Promise.all(
+      paths.map(async (p) => {
+        if (await get().refreshDir(p)) gone.push(p)
+      })
+    )
+    if (gone.length === 0) return
+    // 目录已消失：连同它的子目录缓存与展开状态一起摘掉。
+    // 只删 dirs 不删 expanded 的话，refreshTree 下一轮还会去读一个不存在的目录；
+    // 而删 expanded 才能让「重新打开同一个工作区」时回到干净的初始状态。
+    set((s) => {
+      const dirs = { ...s.dirs }
+      const expanded = { ...s.expanded }
+      for (const p of gone) {
+        // 连带清理以 p 为前缀的子路径缓存（子目录随父目录一起没了）
+        const prefix = p.endsWith('\\') || p.endsWith('/') ? p : p + (p.includes('\\') ? '\\' : '/')
+        for (const k of Object.keys(dirs)) if (k === p || k.startsWith(prefix)) delete dirs[k]
+        for (const k of Object.keys(expanded)) if (k === p || k.startsWith(prefix)) delete expanded[k]
+      }
+      return { dirs, expanded }
+    })
   },
 
   async createEntry(parentPath, name, isDir) {

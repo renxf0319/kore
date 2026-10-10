@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useStore } from '../state/store'
 import { installHotkeys } from '../lib/commands'
+import { fsApi } from '../lib/fs'
 import MenuBar from './MenuBar'
 import Banner from './Banner'
 import Sidebar from './Sidebar'
@@ -12,19 +13,22 @@ import Editor from './Editor'
 import Welcome from './Welcome'
 
 /**
- * 「外部改动 → Kore」这条同步方向的轮询间隔。
+ * 「外部改动 → Kore」这条同步方向的兜底轮询间隔。
  *
- * 为什么用轮询而不是原生文件监听器（notify / chokidar）：
- *  - 本机没有 Rust 工具链，监听器要引入新 crate + 线程 + 事件回传，
- *    是一次无法在本地验证的改动；轮询是纯前端逻辑，可验证、无新依赖。
- *  - 只读「已展开的目录」，通常就是几个目录，一次 read_dir 的成本极低；
- *    且列表没变化时**不触发任何渲染**（见 store.refreshDir），不会有抖动。
- * 2 秒是「够快以至于察觉不到」与「足够省」之间的折中。
+ * 主路径已经换成**内核级文件监听**（见 src-tauri/src/watch.rs）：
+ * 桌面端在资源管理器里删一个文件，事件在几十毫秒内就到，文件树随即更新，
+ * 与 Typora 的实时感一致。这个定时器只是**保险丝**：
+ *  - 监听本身可能失败（网络盘 / 权限受限的目录 / 不支持的 fs），此时它是唯一通路；
+ *  - 事件通道理论上也可能漏（跨卷移动、某些虚拟文件系统），周期性对账能自愈；
+ *  - 浏览器模式没有监听能力（File System Access API 无变更通知），全靠它。
  *
+ * 所以间隔取的是「够快以至于察觉不到」而不是「够省」：
+ * 监听正常时它几乎不产生可感知成本（只读几个已展开目录；列表没变就完全不 setState），
+ * 而一旦监听失效，它就是用户唯一的同步来源，慢一点都会被立刻发现。
  * 窗口重新获得焦点时也会立即刷一次 —— 用户在资源管理器里建完文件切回来，
- * 不必干等这 2 秒。
+ * 不必干等这 1.5 秒。
  */
-const TREE_SYNC_MS = 2000
+const TREE_SYNC_MS = 1500
 
 export default function App() {
   const init = useStore((s) => s.init)
@@ -45,6 +49,12 @@ export default function App() {
   // 反方向（Kore 里新建/删除 → 磁盘）是直接落盘的，并在 store 里主动重读目录，
   // 不需要这里参与。这一侧负责「用户在资源管理器 / 别的编辑器里动了文件」：
   // 新建了一个 .md、删掉了一个文件夹 —— 文件树要跟着变。
+  //
+  // 两条通路（快 → 慢）：
+  //  1. 桌面端：Rust 的 notify 监听器推 `kore://fs-change` → 立即 refreshTree。
+  //     这是主路径，延迟在毫秒级。
+  //  2. 兜底：定时轮询（见 TREE_SYNC_MS 的注释）+ 窗口重新获得焦点时立即刷。
+  const rootPath = useStore((s) => s.rootPath)
   useEffect(() => {
     const refresh = () => void useStore.getState().refreshTree()
     const onVisible = () => {
@@ -63,6 +73,25 @@ export default function App() {
       window.clearInterval(timer)
     }
   }, [])
+
+  // 实时监听：工作区变化时由内核事件驱动刷新（仅桌面端，失败自动退回上面的轮询）。
+  // 依赖 rootPath —— 换工作区要重新监听新目录，旧监听在取消函数里被卸掉。
+  useEffect(() => {
+    if (!rootPath) return
+    let dispose: (() => void) | null = null
+    let cancelled = false
+    void fsApi.watchWorkspace(rootPath, () => {
+      void useStore.getState().refreshTree()
+    }).then((fn) => {
+      // 组件已经卸载 / 工作区已经切走：立刻把刚建立的监听撤掉，避免泄漏
+      if (cancelled) fn()
+      else dispose = fn
+    })
+    return () => {
+      cancelled = true
+      dispose?.()
+    }
+  }, [rootPath])
 
   // 关闭页面前提醒未保存内容
   useEffect(() => {

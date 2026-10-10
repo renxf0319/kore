@@ -561,4 +561,33 @@ export const fsApi = {
   async persistRoot(path: string): Promise<void> {
     if (isTauri) localStorage.setItem('kore-root', path)
   },
+
+  /**
+   * 开始监听工作区（仅桌面端）。
+   *
+   * 磁盘变化由 Rust 侧的 notify 监听器捕获，通过 `kore://fs-change` 事件推过来；
+   * 这里负责把事件接到回调上，并返回一个取消函数。
+   *
+   * ⚠️ 监听失败**不是错误**：网络盘、权限受限的目录、不支持的 fs 都可能拿不到
+   * 内核通知。此时候端仍有一层轮询兜底，功能不退化，只是慢一点。
+   * 所以这里把失败吞掉（只 console.warn），绝不往上抛 —— 打开一个文件夹
+   * 不该因为「监听不了」就报错。
+   */
+  async watchWorkspace(path: string, onChange: () => void): Promise<() => void> {
+    if (!isTauri) return () => {}
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { listen } = await import('@tauri-apps/api/event')
+      // 先挂监听再启动监听器：反过来的话，启动与挂载之间的事件会丢
+      const unlisten = await listen('kore://fs-change', () => onChange())
+      await invoke<void>('watch_workspace', { path })
+      return () => {
+        void unlisten()
+        void invoke<void>('unwatch_workspace').catch(() => {})
+      }
+    } catch (e) {
+      console.warn('[kore] 文件实时监听不可用，退回轮询同步：', e)
+      return () => {}
+    }
+  },
 }

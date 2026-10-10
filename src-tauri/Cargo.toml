@@ -1,6 +1,6 @@
 [package]
 name = "kore"
-version = "0.3.11"
+version = "0.3.12"
 description = "Kore 极速本地 Markdown 编辑器"
 authors = ["Kore Contributors"]
 edition = "2021"
@@ -27,6 +27,10 @@ tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 # 更新装完后重启应用（updater 的收尾动作要调 relaunch）
 tauri-plugin-process = "2"
+# 工作区文件实时监听（磁盘增删改 → 立即通知前端刷新文件树）。
+# 走 OS 原生通知（Windows: ReadDirectoryChangesW），是「删除的瞬间就消失」的唯一实现方式；
+# 纯前端轮询的下限就是轮询间隔，做不出 Typora 那种实时感。
+notify = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
