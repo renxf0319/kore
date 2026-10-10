@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { exportHtml, exportPdf } from '../lib/export'
 import { newWindow, shortcutOf } from '../lib/commands'
-import { checkUpdate, openExternal, RELEASES_PAGE, runInAppUpdate } from '../lib/updater'
+import { checkUpdate, openExternal } from '../lib/updater'
 
 type MenuKey = 'file' | 'theme' | 'about' | null
 
@@ -292,24 +292,17 @@ function ThemeItems({ onPick }: { onPick: (fn?: () => void) => void }) {
  *  2. **结果落到提示条**：复用 store.notice（顶部 Banner），而不是菜单里再开一层浮窗 ——
  *     菜单会在 run() 里关闭，任何写在菜单内部的提示都会跟着消失。
  *  3. **发现新版本要能一键跳下载页**：提示条带 action 按钮，见 Banner.tsx。
+ *
+ * v0.3.13 按需求精简：去掉「下载并安装更新…」「前往下载页」「运行环境」
+ * —— 更新入口统一收在「检查更新…」+ 提示条上，菜单里不再重复。
  */
 function AboutItems({ onPick }: { onPick: (fn?: () => void) => void }) {
   const setNotice = useStore((s) => s.setNotice)
-  const mode = useStore((s) => s.mode)
 
   const items: Item[] = [
     { label: `Kore ${__APP_VERSION__}`, disabled: true },
-    {
-      label: `运行环境：${mode === 'tauri' ? '桌面版' : mode === 'browser' ? '浏览器' : '未知'}`,
-      disabled: true,
-    },
     { sep: true },
     { label: '检查更新…', onSelect: () => void doCheck(setNotice) },
-    // 直接走「下载 → 校验 → 安装 → 重启」，不用先去浏览器
-    ...(mode === 'tauri'
-      ? [{ label: '下载并安装更新…', onSelect: () => runInAppUpdate(setNotice) }]
-      : []),
-    { label: '前往下载页', onSelect: () => void openLink(RELEASES_PAGE, setNotice) },
     { sep: true },
     { label: '项目主页', onSelect: () => void openLink(__REPO_URL__, setNotice) },
   ]
