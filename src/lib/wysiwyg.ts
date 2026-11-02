@@ -2,6 +2,14 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemir
 import { StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state'
 import { syntaxTree } from '@codemirror/language'
 import type { SyntaxNode } from '@lezer/common'
+import { completionStatus } from '@codemirror/autocomplete'
+import {
+  fenceCloses,
+  parseFence,
+  unclosedFenceLines,
+  fenceClosedAfter,
+  isInsideFence,
+} from './fenceParse'
 
 // ---------------------------------------------------------------------------
 // Typora 风格「所见即所得」装饰引擎
@@ -49,6 +57,14 @@ interface Ctx {
   /** 代码围栏内部：不做内联解析 */
   inFence: boolean
   fenceMarker: string
+  /**
+   * 没有配对闭围栏的开围栏行号。
+   *
+   * 这类 ` ``` ` 不进入代码态 —— 否则一旦敲下去，下方所有正文都会被染成
+   * 代码块（用户实测反馈「输入 ``` 后下方内容格式全变了」）。
+   * 它们仍按普通行渲染，等补上闭围栏后才成为真正的代码块。
+   */
+  unclosedFences: Set<number>
 }
 
 function overlaps(claimed: [number, number][], from: number, to: number): boolean {
@@ -170,51 +186,7 @@ const QUOTE_RE = /^(\s*(?:>\s?)+)(.*)$/
 const HR_RE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/
 const TASK_RE = /^(\s*)([-*+])(\s+)(\[[ xX]\])(\s*)(.*)$/
 
-/** 围栏行解析结果 */
-interface FenceInfo {
-  /** 行首缩进宽度（0~3） */
-  indent: number
-  /** 围栏标记本身（``` 或 ~~~，3 个起） */
-  marker: string
-  /** 完整 info string（可含空格，如 `js copy`） */
-  info: string
-  /** 取首个 token 作为语言标识（与 markdown-it 一致） */
-  lang: string
-}
-
-/**
- * 识别围栏行。
- *
- * ⚠️ info string 必须允许空格：` ```js copy ` / ` ```python title=a.py ` 都是
- * 合法围栏（CommonMark 里 info string 就是「语言 + 可选元信息」）。
- * 老实现对 `(\S*)\s*$` 的限制会让这种行**不被当成围栏**，于是整块代码按普通
- * 段落解析，更糟的是块末尾那个 ` ``` ` 反而被当成**开**围栏 ——
- * 后面的正文全被染成代码样式，且因为开/闭错位，一直到文末都无法恢复。
- *
- * ⚠️ 反引号围栏的 info string 里不能再有反引号：那种行是行内代码
- * （`` ```a``` ``），当成围栏会让整行凭空消失。
- */
-function parseFence(lineText: string): FenceInfo | null {
-  const m = /^([ \t]{0,3})(`{3,}|~{3,})[ \t]*(.*?)[ \t]*$/.exec(lineText)
-  if (!m) return null
-  const marker = m[2]
-  const info = m[3]
-  if (marker[0] === '`' && info.includes('`')) return null
-  return { indent: m[1].length, marker, info, lang: info.split(/\s+/)[0] ?? '' }
-}
-
-/**
- * 闭围栏判据（CommonMark）：同种标记、不短于开围栏、且**不能带 info string**。
- *
- * 少了后两条时，块里出现一行 ` ```js ` 或 ` ``` ` 就会提前闭合，
- * 剩下的代码被当成正文，而真正的闭围栏又开了一个新块。
- *
- * 独立成函数是为了让判据只有一个出处 —— 之前表格那侧算过一份「围栏是否闭合」，
- * 两套判据一旦漂移就会出现「表格以为在代码里、围栏以为已闭合」的自相矛盾。
- */
-function fenceCloses(openMarker: string, f: FenceInfo): boolean {
-  return f.marker[0] === openMarker[0] && f.marker.length >= openMarker.length && f.info === ''
-}
+/** 围栏解析与配对规则统一放在 fenceParse.ts（纯逻辑，可单测） */
 
 /**
  * 行内规则。
@@ -346,6 +318,9 @@ function processLine(
       addLine(ctx, lineFrom, 'cm-md-codeblock')
       return
     }
+    // 未配对的围栏：不进入代码态，按普通行显示。
+    // 否则刚敲下 ``` 就会把下方所有正文吞成代码块（用户实测反馈）。
+    if (ctx.unclosedFences.has(lineNo)) return
     ctx.inFence = true
     ctx.fenceMarker = fence.marker
     renderFenceLine(ctx, lineText, lineFrom, lineNo, fence.lang)
@@ -1742,6 +1717,7 @@ function buildFrom(state: EditorState): DecorationSet {
     marks,
     inFence: false,
     fenceMarker: '',
+    unclosedFences: unclosedFenceLines(state.doc),
   }
 
   // 扫描范围是**整篇文档**，不用 visibleRanges。
@@ -2002,8 +1978,42 @@ const hrInputGuard = [
   }),
 ]
 
+/**
+ * 未闭合围栏行：按 Enter 自动补闭围栏。
+ *
+ * 「``` + 回车」立即得到一个**有界**的空代码块（光标停在中间），
+ * 后续正文不会被吸进去，也不用记得手动补 closing fence。
+ * 语言候选打开时不抢回车 —— 那时回车用于采纳候选。
+ */
+const fenceAutoClose = EditorView.domEventHandlers({
+  keydown(e, view) {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false
+    if (e.isComposing) return false
+    if (completionStatus(view.state) === 'active') return false
+    const head = view.state.selection.main.head
+    const doc = view.state.doc
+    const line = doc.lineAt(head)
+    // 只在围栏行末尾处理（刚敲完 ``` 或 ```java）
+    if (head !== line.to) return false
+    const f = parseFence(line.text)
+    if (!f) return false
+    // 已经在别的代码块内部：这一行只是块内内容
+    if (isInsideFence(doc, line.number)) return false
+    // 后面已有闭围栏 → 交给默认回车（在块内换行）
+    if (fenceClosedAfter(doc, line.number, f)) return false
+    e.preventDefault()
+    view.dispatch({
+      changes: { from: line.to, insert: `\n\n${f.marker}` },
+      selection: { anchor: line.to + 1 },
+      scrollIntoView: true,
+      userEvent: 'input',
+    })
+    return true
+  },
+})
+
 export function livePreview(): Extension {
-  return [decoField, cursorSync, tableRefocus, ...hrInputGuard]
+  return [decoField, cursorSync, tableRefocus, ...hrInputGuard, fenceAutoClose]
 }
 
 // --- 供大纲跳转使用 ------------------------------------------------------
