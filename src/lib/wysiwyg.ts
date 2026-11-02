@@ -1,5 +1,5 @@
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
-import { StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state'
+import { StateEffect, StateField, Prec, type EditorState, type Extension } from '@codemirror/state'
 import { syntaxTree } from '@codemirror/language'
 import type { SyntaxNode } from '@lezer/common'
 import { completionStatus } from '@codemirror/autocomplete'
@@ -7,7 +7,6 @@ import {
   fenceCloses,
   parseFence,
   unclosedFenceLines,
-  fenceClosedAfter,
   isInsideFence,
 } from './fenceParse'
 
@@ -57,6 +56,8 @@ interface Ctx {
   /** 代码围栏内部：不做内联解析 */
   inFence: boolean
   fenceMarker: string
+  /** 「刚输入出来的围栏行」——只有它才按「未提交」处理（不进入代码态） */
+  freshFenceLine: number
   /**
    * 没有配对闭围栏的开围栏行号。
    *
@@ -319,8 +320,15 @@ function processLine(
       return
     }
     // 未配对的围栏：不进入代码态，按普通行显示。
-    // 否则刚敲下 ``` 就会把下方所有正文吞成代码块（用户实测反馈）。
-    if (ctx.unclosedFences.has(lineNo)) return
+    // 光标停在「刚输入出来的」开围栏上（还没按 Enter 提交）时同样不进代码态：
+    // 否则文档后面任意一个已有的 ``` 都会被当成闭围栏，
+    // 把两者之间的正文整段吞成代码块（用户实测反馈的核心场景）。
+    // 已有代码块的开围栏不受影响（freshFenceLine 只在刚输入时命中）。
+    if (
+      ctx.unclosedFences.has(lineNo) ||
+      (ctx.cursorLine === lineNo && ctx.freshFenceLine === lineNo)
+    )
+      return
     ctx.inFence = true
     ctx.fenceMarker = fence.marker
     renderFenceLine(ctx, lineText, lineFrom, lineNo, fence.lang)
@@ -1717,6 +1725,7 @@ function buildFrom(state: EditorState): DecorationSet {
     marks,
     inFence: false,
     fenceMarker: '',
+    freshFenceLine: state.field(freshFenceField, false) ?? -1,
     unclosedFences: unclosedFenceLines(state.doc),
   }
 
@@ -1957,26 +1966,54 @@ const hrInputGuard = [
     })
     return true
   }),
-  EditorView.domEventHandlers({
-    keydown(e, view) {
-      // 只接管「纯回车」：带修饰键的交给上层快捷键；输入法组字期间更不能抢
-      if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false
-      if (e.isComposing) return false
-      const head = view.state.selection.main.head
-      if (!isHrLine(view, head)) return false
-      // 光标停在横线的任意位置，回车都落到行尾之后 —— 不能把 --- 劈成两半
-      const line = view.state.doc.lineAt(head)
-      e.preventDefault()
-      view.dispatch({
-        changes: { from: line.to, insert: '\n' },
-        selection: { anchor: line.to + 1 },
-        scrollIntoView: true,
-        userEvent: 'input',
-      })
-      return true
-    },
-  }),
+  Prec.highest(
+    EditorView.domEventHandlers({
+      keydown(e, view) {
+        // 只接管「纯回车」：带修饰键的交给上层快捷键；输入法组字期间更不能抢
+        if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false
+        if (e.isComposing) return false
+        const head = view.state.selection.main.head
+        if (!isHrLine(view, head)) return false
+        // 光标停在横线的任意位置，回车都落到行尾之后 —— 不能把 --- 劈成两半
+        const line = view.state.doc.lineAt(head)
+        e.preventDefault()
+        view.dispatch({
+          changes: { from: line.to, insert: '\n' },
+          selection: { anchor: line.to + 1 },
+          scrollIntoView: true,
+          userEvent: 'input',
+        })
+        return true
+      },
+    })
+  ),
 ]
+
+/**
+ * 记录「刚输入出来的围栏行」（1 起；-1 表示没有）。
+ *
+ * 只有这种围栏在按 Enter 时才自动补闭围栏：
+ *  - 刚敲完 ``` / ```java 按回车 → 就地闭合，绝不去和文档后面远处的 ``` 配对；
+ *  - 打开已有文档、光标停在旧围栏上按回车 → 保持默认行为（在块内换行），
+ *    不会凭空多出一个闭围栏把原代码块劈开。
+ *
+ * 纯选区变化且光标离开该行时清空，避免状态残留到下一次输入。
+ */
+const freshFenceField = StateField.define<number>({
+  create: () => -1,
+  update(value, tr) {
+    if (tr.docChanged) {
+      const head = tr.state.selection.main.head
+      const line = tr.state.doc.lineAt(head)
+      return parseFence(line.text) ? line.number : -1
+    }
+    if (tr.selection) {
+      const line = tr.state.doc.lineAt(tr.selection.main.head).number
+      return value === line ? value : -1
+    }
+    return value
+  },
+})
 
 /**
  * 未闭合围栏行：按 Enter 自动补闭围栏。
@@ -1985,8 +2022,9 @@ const hrInputGuard = [
  * 后续正文不会被吸进去，也不用记得手动补 closing fence。
  * 语言候选打开时不抢回车 —— 那时回车用于采纳候选。
  */
-const fenceAutoClose = EditorView.domEventHandlers({
-  keydown(e, view) {
+const fenceAutoClose = Prec.highest(
+  EditorView.domEventHandlers({
+    keydown(e, view) {
     if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false
     if (e.isComposing) return false
     if (completionStatus(view.state) === 'active') return false
@@ -1999,8 +2037,8 @@ const fenceAutoClose = EditorView.domEventHandlers({
     if (!f) return false
     // 已经在别的代码块内部：这一行只是块内内容
     if (isInsideFence(doc, line.number)) return false
-    // 后面已有闭围栏 → 交给默认回车（在块内换行）
-    if (fenceClosedAfter(doc, line.number, f)) return false
+    // 只处理「刚输入出来的围栏」：旧围栏上的回车保持默认行为
+    if (view.state.field(freshFenceField) !== line.number) return false
     e.preventDefault()
     view.dispatch({
       changes: { from: line.to, insert: `\n\n${f.marker}` },
@@ -2009,11 +2047,12 @@ const fenceAutoClose = EditorView.domEventHandlers({
       userEvent: 'input',
     })
     return true
-  },
-})
+    },
+  })
+)
 
 export function livePreview(): Extension {
-  return [decoField, cursorSync, tableRefocus, ...hrInputGuard, fenceAutoClose]
+  return [decoField, cursorSync, tableRefocus, ...hrInputGuard, fenceAutoClose, freshFenceField]
 }
 
 // --- 供大纲跳转使用 ------------------------------------------------------
