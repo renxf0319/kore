@@ -68,6 +68,25 @@ jobs:
         shell: bash
         run: npm run check:tauri
 
+      # 项目级约定：**每次发布必须列出本版本改了什么**。
+      # 从 CHANGELOG.md 抽取当前 tag 对应段落，写入 GitHub Release 的 body；
+      # 找不到对应段落（例如手动 Run workflow）时回退到安装包说明，不让发版失败。
+      - name: Extract release notes
+        id: notes
+        shell: bash
+        run: |
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME}" > release-notes.md || true
+          if [ -s release-notes.md ]; then
+            printf '\n---\n\nWindows 安装包（.exe，双击安装）。装好后可在应用内「检查更新」自动升级，无云同步。\n' >> release-notes.md
+            {
+              echo 'body<<__KORE_RELEASE_NOTES__'
+              cat release-notes.md
+              echo '__KORE_RELEASE_NOTES__'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo 'body=Windows 安装包（.exe，双击安装）。装好后可在应用内「检查更新」自动升级，无云同步。' >> "$GITHUB_OUTPUT"
+          fi
+
       # 应用内更新需要签名私钥。但「没配密钥」不该让整个发版挂掉 ——
       # createUpdaterArtifacts 在缺少密钥时会让 Tauri 直接构建失败，
       # 所以检测不到就把它去掉：代价只是这次不发更新清单，安装包照常产出。
@@ -97,7 +116,8 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: 'Kore v__VERSION__'
-          releaseBody: 'Windows 安装包（.exe，双击安装）。装好后可在应用内「检查更新」自动升级，无云同步。'
+          # 由上面「Extract release notes」从 CHANGELOG.md 抽取本版本变更
+          releaseBody: ${{ steps.notes.outputs.body }}
           # 直接发布（不建草稿），方便直接点下载链接取包
           releaseDraft: false
           # ⚠️ 必须为 false（正式版），不能是 true（预发布）。
