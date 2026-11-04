@@ -91,7 +91,6 @@ interface AppState {
   tabs: OpenTab[]
   /** 当前激活标签的 id（不是 path —— 未命名文档没有 path） */
   active: string | null
-  ready: boolean
   notice: Notice | null
   /** 左侧栏当前页签：文件 / 大纲 */
   pane: SidePane
@@ -220,6 +219,10 @@ function makeBlank(): OpenTab {  untitledSeq += 1
   }
 }
 
+// 启动瞬间就要有一个可编辑的空白文档（首帧即编辑区，不等 init 完成），
+// 否则首帧渲染的是空状态，init 结束后才被替换成编辑器，视觉上就是「闪一下」。
+const initialDoc = makeBlank()
+
 export const useStore = create<AppState>((set, get) => ({
   theme: 'light',
   mode: 'unknown',
@@ -227,9 +230,8 @@ export const useStore = create<AppState>((set, get) => ({
   rootName: null,
   expanded: {},
   dirs: {},
-  tabs: [],
-  active: null,
-  ready: false,
+  tabs: [initialDoc],
+  active: initialDoc.id,
   notice: null,
   pane: 'files',
   sidebarOpen: true,
@@ -249,46 +251,49 @@ export const useStore = create<AppState>((set, get) => ({
       await fsApi.forgetRoot()
       set(single(makeBlank()))
       set({
-        ready: true,
         notice: { kind: 'info', text: '已清除上次打开的文件夹记录，请重新选择目录' },
       })
       return
     }
 
-    try {
-      const { value: restored, timedOut } = await withTimeout(fsApi.restore(), 3000)
-      if (timedOut) {
-        set({
-          notice: {
-            kind: 'error',
-            text: '恢复上次打开的文件夹超时，已跳过。可点击工具栏「打开文件夹」重新选择目录。',
-          },
-        })
-      }
-      if (restored) {
-        set({ rootPath: restored.name, rootName: rootNameOf(restored.name) })
-        if (restored.granted) {
-          await get().loadDir(restored.name)
-        } else {
-          // 句柄还在，但浏览器要求由用户手势重新授权 —— 这在每次新开页面时都会发生，
-          // 必须给出明确入口，否则所有文件操作都会静默失败。
+    // 桌面端不自动恢复上次的工作区：新窗口从干净的空白文档开始，
+    // 需要哪个目录由用户主动打开（菜单「文件 → 打开文件夹」）。
+    // 浏览器端没有句柄就只能每次重选目录，体验太差，所以保留恢复。
+    if (!isTauri) {
+      try {
+        const { value: restored, timedOut } = await withTimeout(fsApi.restore(), 3000)
+        if (timedOut) {
           set({
             notice: {
-              kind: 'info',
-              text: `上次打开的「${restored.name}」需要重新授权才能读写`,
-              action: 'regrant',
+              kind: 'error',
+              text: '恢复上次打开的文件夹超时，已跳过。可点击工具栏「打开文件夹」重新选择目录。',
             },
           })
         }
+        if (restored) {
+          set({ rootPath: restored.name, rootName: rootNameOf(restored.name) })
+          if (restored.granted) {
+            await get().loadDir(restored.name)
+          } else {
+            // 句柄还在，但浏览器要求由用户手势重新授权 —— 这在每次新开页面时都会发生，
+            // 必须给出明确入口，否则所有文件操作都会静默失败。
+            set({
+              notice: {
+                kind: 'info',
+                text: `上次打开的「${restored.name}」需要重新授权才能读写`,
+                action: 'regrant',
+              },
+            })
+          }
+        }
+      } catch (e) {
+        set({ notice: { kind: 'error', text: `恢复上次的文件夹失败：${errText(e)}` } })
       }
-    } catch (e) {
-      set({ notice: { kind: 'error', text: `恢复上次的文件夹失败：${errText(e)}` } })
     }
     // 启动即备好一个空的未命名文档（Typora 的行为）：
-    // 右侧编辑区一进来就是可输入的光标，而不是欢迎页 ——
+    // 右侧编辑区一进来就是可输入的光标 ——
     // 「打开文件」应该是主动选择的结果，而不是进入编辑器的前提。
     set(single(makeBlank()))
-    set({ ready: true })
   },
 
   setNotice(n) {

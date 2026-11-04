@@ -1366,65 +1366,6 @@ body.resizing-col * {
   opacity: 1;
 }
 
-/* ---------------- 欢迎页 ---------------- */
-.welcome {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.welcome-card {
-  text-align: center;
-  padding: 40px;
-}
-.welcome-wordmark {
-  width: 148px;
-  height: auto;
-}
-.welcome-card .subtitle {
-  color: var(--fg-muted);
-  margin: 10px 0 26px;
-  font-size: 13px;
-}
-.welcome-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.welcome-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
-  background: var(--bg);
-  /* 欢迎页的「新建 / 打开」是**发起动作**的按钮（不是面板切换），
-     这里保留手型，与全局 button 改 default 的取向区分开。 */
-  cursor: pointer;
-}
-.welcome-actions button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.welcome-actions .primary-btn {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.welcome-actions .primary-btn:hover {
-  filter: brightness(1.08);
-  color: #fff;
-}
-.welcome-card .hint {
-  margin-top: 22px;
-  font-size: 12px;
-  color: var(--fg-muted);
-  opacity: 0.8;
-}
-
 /* ---------------- 打印 ----------------
    导出 PDF 时：隐藏整个应用，把 #kore-print-root 的渲染结果铺满一页。
    （这个容器由 lib/export.ts 的 injectPrintDoc 在导出时动态创建） */

@@ -10,7 +10,6 @@ import DocBar from './DocBar'
 import StatusBar from './StatusBar'
 import ConfirmSwitch from './ConfirmSwitch'
 import Editor from './Editor'
-import Welcome from './Welcome'
 
 /**
  * 「外部改动 → Kore」这条同步方向的兜底轮询间隔。
@@ -33,7 +32,6 @@ const TREE_SYNC_MS = 1500
 export default function App() {
   const init = useStore((s) => s.init)
   const active = useStore((s) => s.active)
-  const ready = useStore((s) => s.ready)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const sidebarW = useStore((s) => s.sidebarW)
 
@@ -116,7 +114,9 @@ export default function App() {
         )}
         {sidebarOpen && <SidebarResizer />}
         <div className="main">
-          {ready && active ? <Editor /> : <Welcome />}
+          {/* active 在 store 创建时就有初始空白文档，首帧即编辑器，
+              不存在「先欢迎页后编辑器」的中间态 */}
+          {active ? <Editor /> : null}
         </div>
       </div>
       <DocBar />
