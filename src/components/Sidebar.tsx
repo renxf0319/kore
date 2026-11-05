@@ -55,7 +55,10 @@ function OutlineList() {
     <ul className="outline">
       {items.map((it, i) => (
         <li key={`${it.line}-${i}`} className={`lv-${it.level}`}>
-          <button onClick={() => setJumpLine(it.line)}>{it.text}</button>
+          {/* 条目做单行省略号截断；title 让悬停时能看到完整标题（与文件树一致） */}
+          <button title={it.text} onClick={() => setJumpLine(it.line)}>
+            {it.text}
+          </button>
         </li>
       ))}
     </ul>
