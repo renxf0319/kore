@@ -256,10 +256,10 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
-    // 桌面端不自动恢复上次的工作区：新窗口从干净的空白文档开始，
-    // 需要哪个目录由用户主动打开（菜单「文件 → 打开文件夹」）。
-    // 浏览器端没有句柄就只能每次重选目录，体验太差，所以保留恢复。
-    if (!isTauri) {
+    // 恢复上次的工作区，但只对「应用启动」生效。
+    // 菜单「新建窗口」打开的窗口 URL 带 ?blank —— 用户要的是干净的空白界面，
+    // 恢复成上次的目录反而突兀；进程的首个窗口没有这个参数，照常恢复。
+    if (!new URLSearchParams(location.search).has('blank')) {
       try {
         const { value: restored, timedOut } = await withTimeout(fsApi.restore(), 3000)
         if (timedOut) {

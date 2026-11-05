@@ -52,11 +52,13 @@ function keyLabel(key: string): string {
 
 /** 新建窗口：桌面端开新的 Tauri Webview 窗口，浏览器端开新标签页 */
 export function newWindow(): void {
+  // ?blank：新窗口从干净的空白界面开始，不恢复上次的工作区（见 store.init）。
+  // 应用启动的首个窗口没有这个参数，所以照常恢复。
   if (window.__TAURI_INTERNALS__) {
     void import('@tauri-apps/api/webviewWindow').then(({ WebviewWindow }) => {
       const label = `kore-${Date.now()}`
       new WebviewWindow(label, {
-        url: 'index.html',
+        url: 'index.html?blank=1',
         title: 'Kore',
         width: 1200,
         height: 800,
@@ -64,7 +66,9 @@ export function newWindow(): void {
     })
     return
   }
-  window.open(location.href, '_blank')
+  const url = new URL(location.href)
+  url.searchParams.set('blank', '1')
+  window.open(url.toString(), '_blank')
 }
 
 export const COMMANDS: Command[] = [
