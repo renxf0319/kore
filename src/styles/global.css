@@ -1049,6 +1049,14 @@ body.resizing-col * {
   padding-left: 12px;
 }
 
+.cm-md-fence-hint {
+  margin-left: 0.75em;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--fg-muted);
+  user-select: none;
+}
+
 /* ---------------- 代码围栏语言候选（输入 ``` 后弹出） ---------------- */
 /* 复用 CodeMirror 的 .cm-tooltip.cm-tooltip-autocomplete 容器，
    这里只做配色和圆角，让它和整体风格一致。 */

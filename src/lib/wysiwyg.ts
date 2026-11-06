@@ -1,12 +1,13 @@
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view'
-import { StateEffect, StateField, Prec, type EditorState, type Extension } from '@codemirror/state'
+import { StateEffect, StateField, Prec, type ChangeDesc, type EditorState, type Extension } from '@codemirror/state'
 import { syntaxTree } from '@codemirror/language'
 import type { SyntaxNode } from '@lezer/common'
 import { completionStatus } from '@codemirror/autocomplete'
+import { isolateHistory } from '@codemirror/commands'
 import {
   fenceCloses,
   parseFence,
-  unclosedFenceLines,
+  computeFencePairs,
   isInsideFence,
 } from './fenceParse'
 
@@ -59,13 +60,14 @@ interface Ctx {
   /** 「刚输入出来的围栏行」——只有它才按「未提交」处理（不进入代码态） */
   freshFenceLine: number
   /**
-   * 没有配对闭围栏的开围栏行号。
-   *
-   * 这类 ` ``` ` 不进入代码态 —— 否则一旦敲下去，下方所有正文都会被染成
-   * 代码块（用户实测反馈「输入 ``` 后下方内容格式全变了」）。
-   * 它们仍按普通行渲染，等补上闭围栏后才成为真正的代码块。
+   * 配对表：开围栏行号 → 它的闭围栏行号（见 fencePairsField）。
+   * 只有这里登记的配对才进入代码态；落单的围栏行按普通文本显示，
+   * 不吞下方正文。
    */
-  unclosedFences: Set<number>
+  fenceCloseOf: Map<number, number>
+  fenceCloseLines: Set<number>
+  /** 当前代码块「应该在第几行结束」：只有这一行才闭块（fencePairsField 登记的闭围栏） */
+  expectedCloseLine: number
 }
 
 function overlaps(claimed: [number, number][], from: number, to: number): boolean {
@@ -309,9 +311,12 @@ function processLine(
   const fence = parseFence(lineText)
   if (fence) {
     if (ctx.inFence) {
-      if (fenceCloses(ctx.fenceMarker, fence)) {
+      // 只有配对表登记的闭围栏才闭块；块内其它围栏行（```js 这类带 info 的）
+      // 按代码内容显示 —— 与栈式配对的语义一致
+      if (lineNo === ctx.expectedCloseLine && fenceCloses(ctx.fenceMarker, fence)) {
         ctx.inFence = false
         ctx.fenceMarker = ''
+        ctx.expectedCloseLine = -1
         renderFenceLine(ctx, lineText, lineFrom, lineNo, '')
         return
       }
@@ -319,18 +324,25 @@ function processLine(
       addLine(ctx, lineFrom, 'cm-md-codeblock')
       return
     }
-    // 未配对的围栏：不进入代码态，按普通行显示。
+    const closeLine = ctx.fenceCloseOf.get(lineNo)
+    // 落单的围栏行：不进入代码态，按普通行显示，下方正文不受影响。
     // 光标停在「刚输入出来的」开围栏上（还没按 Enter 提交）时同样不进代码态：
-    // 否则文档后面任意一个已有的 ``` 都会被当成闭围栏，
-    // 把两者之间的正文整段吞成代码块（用户实测反馈的核心场景）。
-    // 已有代码块的开围栏不受影响（freshFenceLine 只在刚输入时命中）。
-    if (
-      ctx.unclosedFences.has(lineNo) ||
-      (ctx.cursorLine === lineNo && ctx.freshFenceLine === lineNo)
-    )
+    // 否则它会被当场配对，把两者之间的正文整段吞成代码块
+    // （用户实测反馈的核心场景）。
+    if (closeLine === undefined) {
+      if (!ctx.fenceCloseLines.has(lineNo) && ctx.freshFenceLine !== lineNo) {
+        ctx.out.push({
+          from: lineFrom + lineText.length,
+          to: lineFrom + lineText.length,
+          deco: Decoration.widget({ widget: new UnclosedFenceHint(), side: 1 }),
+        })
+      }
       return
+    }
+    if (ctx.cursorLine === lineNo && ctx.freshFenceLine === lineNo) return
     ctx.inFence = true
     ctx.fenceMarker = fence.marker
+    ctx.expectedCloseLine = closeLine
     renderFenceLine(ctx, lineText, lineFrom, lineNo, fence.lang)
     return
   }
@@ -686,6 +698,19 @@ class FenceLabel extends WidgetType {
     const s = document.createElement('span')
     s.className = 'cm-md-fence-label'
     s.textContent = this.lang
+    return s
+  }
+}
+
+class UnclosedFenceHint extends WidgetType {
+  eq(): boolean {
+    return true
+  }
+  toDOM(): HTMLElement {
+    const s = document.createElement('span')
+    s.className = 'cm-md-fence-hint'
+    s.textContent = '围栏未闭合'
+    s.title = '此围栏未配对，下方正文不受影响。补齐匹配围栏或删除此行即可。'
     return s
   }
 }
@@ -1717,6 +1742,15 @@ function buildFrom(state: EditorState): DecorationSet {
   const out: Pending[] = []
   const marks: [number, number][] = []
   const sel = state.selection.main
+  // 围栏配对表。CM 的 field 在 transaction 里是按需计算的：这里读取会立刻
+  // 用本次 transaction 算出 fencePairsField 的新值，与文档变化同步
+  const fenceCloseOf = new Map<number, number>()
+  for (const p of state.field(fencePairsField)) {
+    fenceCloseOf.set(
+      state.doc.lineAt(p.openFrom).number,
+      state.doc.lineAt(p.closeFrom).number
+    )
+  }
   const ctx: Ctx = {
     cursorLine: focusProxy ? state.doc.lineAt(sel.head).number : -1,
     cursorPos: focusProxy ? sel.head : -1,
@@ -1726,7 +1760,9 @@ function buildFrom(state: EditorState): DecorationSet {
     inFence: false,
     fenceMarker: '',
     freshFenceLine: state.field(freshFenceField, false) ?? -1,
-    unclosedFences: unclosedFenceLines(state.doc),
+    fenceCloseOf,
+    fenceCloseLines: new Set(fenceCloseOf.values()),
+    expectedCloseLine: -1,
   }
 
   // 扫描范围是**整篇文档**，不用 visibleRanges。
@@ -1826,6 +1862,104 @@ function buildFrom(state: EditorState): DecorationSet {
  */
 const setFocus = StateEffect.define<boolean>()
 
+// --- 围栏配对表 -------------------------------------------------------------
+//
+// 记住「哪个开围栏配哪个闭围栏」，编辑后优先沿用旧配对，而不是每次按当前文本
+// 重新栈式配对。
+//
+// 为什么需要它（用户实测 bug）：文档里有两个代码块时，删掉第一个的闭围栏，
+// 剩下的开围栏会立刻与第二个代码块的开围栏重新配对，把两者之间的正文整段
+// 染成代码块 —— 用户只是删了个代码块，下方内容却「被污染」。
+// 纯文本配对分不清「这段正文本来就在代码块外」，只能拿编辑前的配对做参照：
+// 删掉的闭围栏没有了，原来的 (开2, 闭2) 原样保留，落单的开围栏按未配对容错
+// 显示成一行普通 ``` 文本，用户看见删掉即可，正文不受影响。
+//
+// 存**行首绝对位置**而不是行号：行号随编辑漂移，位置可以经 changes 精确映射。
+
+interface StoredFencePair {
+  openFrom: number
+  closeFrom: number
+}
+
+/** 旧配对在新文档里是否仍然成立；成立返回映射后的新位置，否则 null */
+function pairSurvives(
+  doc: EditorState['doc'],
+  changes: ChangeDesc,
+  p: StoredFencePair
+): StoredFencePair | null {
+  const openFrom = changes.mapPos(p.openFrom, 1)
+  const closeFrom = changes.mapPos(p.closeFrom, -1)
+  if (openFrom >= closeFrom) return null
+  const openLine = doc.lineAt(openFrom)
+  const closeLine = doc.lineAt(closeFrom)
+  // 行首位置被编辑挪动（在围栏前插字、与上一行合并等）→ 配对作废
+  if (openLine.from !== openFrom || closeLine.from !== closeFrom) return null
+  const open = parseFence(openLine.text)
+  const close = parseFence(closeLine.text)
+  if (!open || !close || !fenceCloses(open.marker, close)) return null
+  // 内部新出现能闭合开围栏的围栏行：按 CommonMark 它早就该闭块了，交给重新配对
+  for (let n = openLine.number + 1; n < closeLine.number; n++) {
+    const f = parseFence(doc.line(n).text)
+    if (f && fenceCloses(open.marker, f)) return null
+  }
+  return { openFrom, closeFrom }
+}
+
+const fencePairsField = StateField.define<StoredFencePair[]>({
+  create: (state) =>
+    computeFencePairs(state.doc).map((p) => ({
+      openFrom: state.doc.line(p.open).from,
+      closeFrom: state.doc.line(p.close).from,
+    })),
+  update(value, tr) {
+    if (!tr.docChanged) return value
+    const doc = tr.state.doc
+
+    // 1) 旧配对能沿住的先沿住（稳定性的来源）
+    const kept: StoredFencePair[] = []
+    for (const p of value) {
+      const np = pairSurvives(doc, tr.changes, p)
+      if (np) kept.push(np)
+    }
+    kept.sort((a, b) => a.openFrom - b.openFrom)
+    const keptOpen = new Set(kept.map((p) => doc.lineAt(p.openFrom).number))
+    const keptClose = new Set(kept.map((p) => doc.lineAt(p.closeFrom).number))
+    const insideKept = (n: number): boolean =>
+      kept.some((p) => {
+        const o = doc.lineAt(p.openFrom).number
+        const c = doc.lineAt(p.closeFrom).number
+        return n > o && n < c
+      })
+
+    // 2) 落单围栏只在「保留配对之间的空隙」里重新栈式配对：
+    //    不允许跨保留配对配对，避免把已有的代码块吞进新块里
+    const extra: StoredFencePair[] = []
+    let pending = -1
+    let pendingMarker = ''
+    const flush = (): void => {
+      pending = -1
+      pendingMarker = ''
+    }
+    for (let n = 1; n <= doc.lines; n++) {
+      const f = parseFence(doc.line(n).text)
+      if (!f) continue
+      if (keptOpen.has(n) || keptClose.has(n)) {
+        flush()
+        continue
+      }
+      if (insideKept(n)) continue
+      if (pending < 0) {
+        pending = n
+        pendingMarker = f.marker
+      } else if (fenceCloses(pendingMarker, f)) {
+        extra.push({ openFrom: doc.line(pending).from, closeFrom: doc.line(n).from })
+        flush()
+      }
+    }
+    return [...kept, ...extra].sort((a, b) => a.openFrom - b.openFrom)
+  },
+})
+
 const decoField = StateField.define<DecorationSet>({
   create: (state) => {
     // 新视图刚建好时**一定还没有焦点**。focusProxy 是模块级变量，会带着上一个
@@ -1851,6 +1985,9 @@ const decoField = StateField.define<DecorationSet>({
 
     // 注意：Transaction 上是 `selection`，ViewUpdate 上才是 `selectionSet`
     if (!tr.selection) return decos
+    if (tr.startState.field(freshFenceField, false) !== tr.state.field(freshFenceField, false)) {
+      return buildFrom(tr.state)
+    }
 
     // ⚠️ 选区变了**不一定**要重算装饰。只有两种情况会改变结果：
     //   1. 光标「命中 / 脱离」了某个标记区间 → 该标记的显隐要翻转
@@ -2051,8 +2188,38 @@ const fenceAutoClose = Prec.highest(
   })
 )
 
+const emptyFenceBackspace = Prec.highest(
+  EditorView.domEventHandlers({
+    keydown(e, view) {
+      if (e.key !== 'Backspace' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false
+      if (e.isComposing || view.composing) return false
+      const { state } = view
+      if (state.readOnly || state.selection.ranges.length !== 1 || !state.selection.main.empty) return false
+      const head = state.selection.main.head
+      const line = state.doc.lineAt(head)
+      if (head !== line.from) return false
+      const pair = state.field(fencePairsField).find((p) => head > p.openFrom && head <= p.closeFrom)
+      if (!pair) return false
+      const open = state.doc.lineAt(pair.openFrom)
+      const close = state.doc.lineAt(pair.closeFrom)
+      for (let n = open.number + 1; n < close.number; n++) {
+        if (state.doc.line(n).text.trim() !== '') return false
+      }
+      e.preventDefault()
+      view.dispatch({
+        changes: { from: open.from, to: close.to, insert: '' },
+        selection: { anchor: open.from },
+        annotations: isolateHistory.of('full'),
+        scrollIntoView: true,
+        userEvent: 'input.delete',
+      })
+      return true
+    },
+  })
+)
+
 export function livePreview(): Extension {
-  return [decoField, cursorSync, tableRefocus, ...hrInputGuard, fenceAutoClose, freshFenceField]
+  return [fencePairsField, decoField, cursorSync, tableRefocus, ...hrInputGuard, fenceAutoClose, emptyFenceBackspace, freshFenceField]
 }
 
 // --- 供大纲跳转使用 ------------------------------------------------------

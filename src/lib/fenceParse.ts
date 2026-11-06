@@ -60,19 +60,19 @@ export function fenceCloses(openMarker: string, f: FenceInfo): boolean {
   return f.marker[0] === openMarker[0] && f.marker.length >= openMarker.length && f.info === ''
 }
 
+/** 一对配对成功的围栏（行号，1 起） */
+export interface FencePair {
+  open: number
+  close: number
+}
+
 /**
- * 找出所有「没有配对闭围栏」的开围栏行号。
- *
- * 为什么需要它：CommonMark 规定未闭合的围栏一直延伸到文末，所以严格按语法
- * 渲染时，用户刚敲下 ``` 就会把后面的正文全染成代码块。编辑过程中这非常吓人
- * （实测用户直接反馈「下方内容格式全被影响」）。
- * 这里只把**配对成功**的围栏当代码块，未配对的按普通行显示，等补上闭围栏
- * 再变成真代码块 —— 文档源码不变，只是编辑态更宽容。
- *
- * 同一时刻最多只有一个未闭合的开围栏（后面的围栏行只会是块内内容）。
+ * 按 CommonMark 栈式规则配对围栏：开围栏被「同种标记、不短于它、无 info string」
+ * 的后续围栏闭合；闭合之前的其它围栏行算块内内容（如块里出现的 ```js 示例）。
+ * 配不上闭围栏的开围栏不进结果 —— 由调用方按普通行容错显示。
  */
-export function unclosedFenceLines(doc: DocLike): Set<number> {
-  const unclosed = new Set<number>()
+export function computeFencePairs(doc: DocLike): FencePair[] {
+  const pairs: FencePair[] = []
   let openLine = -1
   let openMarker = ''
   for (let n = 1; n <= doc.lines; n++) {
@@ -82,12 +82,12 @@ export function unclosedFenceLines(doc: DocLike): Set<number> {
       openLine = n
       openMarker = f.marker
     } else if (fenceCloses(openMarker, f)) {
+      pairs.push({ open: openLine, close: n })
       openLine = -1
       openMarker = ''
     }
   }
-  if (openLine > 0) unclosed.add(openLine)
-  return unclosed
+  return pairs
 }
 
 /** 从 lineNo 之后是否还存在能闭合该开围栏的闭围栏 */
