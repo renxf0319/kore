@@ -79,6 +79,21 @@ function withTimeout<T>(
   })
 }
 
+const LAST_FILE_KEY = 'kore-last-file'
+
+/**
+ * 记住 / 清除「上次打开的页面」，供启动时恢复（见 init）。
+ * 存不上只是下次启动不恢复，不影响本次会话。
+ */
+function rememberFile(path: string | null): void {
+  try {
+    if (path) localStorage.setItem(LAST_FILE_KEY, path)
+    else localStorage.removeItem(LAST_FILE_KEY)
+  } catch {
+    /* 存储不可用时忽略 */
+  }
+}
+
 let untitledSeq = 0
 
 interface AppState {
@@ -249,6 +264,7 @@ export const useStore = create<AppState>((set, get) => ({
     // 当恢复流程本身把页面拖死、连界面都点不动时，这是唯一还能用的自救方式。
     if (new URLSearchParams(location.search).has('reset')) {
       await fsApi.forgetRoot()
+      rememberFile(null)
       set(single(makeBlank()))
       set({
         notice: { kind: 'info', text: '已清除上次打开的文件夹记录，请重新选择目录' },
@@ -256,9 +272,10 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
-    // 恢复上次的工作区，但只对「应用启动」生效。
+    // 恢复上次的工作区与页面，但只对「应用启动」生效。
     // 菜单「新建窗口」打开的窗口 URL 带 ?blank —— 用户要的是干净的空白界面，
     // 恢复成上次的目录反而突兀；进程的首个窗口没有这个参数，照常恢复。
+    let restoredFile = false
     if (!new URLSearchParams(location.search).has('blank')) {
       try {
         const { value: restored, timedOut } = await withTimeout(fsApi.restore(), 3000)
@@ -286,14 +303,40 @@ export const useStore = create<AppState>((set, get) => ({
             })
           }
         }
+        // 工作区就绪后，把上次编辑的页面也一并打开 —— 启动直接回到
+        // 上次的现场，而不是一个空白页。恢复失败（文件已删、浏览器端
+        // 尚未授权等）静默落到空白文档：这不是故障，不值得打扰用户。
+        let last: string | null = null
+        try {
+          last = localStorage.getItem(LAST_FILE_KEY)
+        } catch {
+          /* 存储不可用时按无记录处理 */
+        }
+        if (last) {
+          try {
+            const content = await fsApi.readFile(last)
+            set(
+              single({
+                id: `file-${last}`,
+                path: last,
+                name: rootNameOf(last),
+                content,
+                savedContent: content,
+                dirty: false,
+              })
+            )
+            restoredFile = true
+          } catch {
+            /* 文件已不存在或暂不可读，保持空白 */
+          }
+        }
       } catch (e) {
         set({ notice: { kind: 'error', text: `恢复上次的文件夹失败：${errText(e)}` } })
       }
     }
-    // 启动即备好一个空的未命名文档（Typora 的行为）：
-    // 右侧编辑区一进来就是可输入的光标 ——
-    // 「打开文件」应该是主动选择的结果，而不是进入编辑器的前提。
-    set(single(makeBlank()))
+    // 启动即备好一个可输入的文档：优先是刚恢复的上次页面，
+    // 没有可恢复的才退到空白未命名文档（Typora 的行为）。
+    if (!restoredFile) set(single(makeBlank()))
   },
 
   setNotice(n) {
@@ -364,7 +407,10 @@ export const useStore = create<AppState>((set, get) => ({
   requestClose() {
     // 关掉最后一个文档后补一个空白文档，编辑区不退回欢迎页 ——
     // 与 Typora 一致：任何时刻都有一个可输入的编辑区。
-    get().guard(() => set(single(makeBlank())))
+    get().guard(() => {
+      set(single(makeBlank()))
+      rememberFile(null)
+    })
   },
 
   resolveDiscard() {
@@ -379,7 +425,10 @@ export const useStore = create<AppState>((set, get) => ({
 
   // 新建空白文档：不碰磁盘，直接进编辑态，保存时再问存哪
   newDoc() {
-    get().guard(() => set(single(makeBlank())))
+    get().guard(() => {
+      set(single(makeBlank()))
+      rememberFile(null)
+    })
   },
 
   async openFileDialog() {
@@ -409,6 +458,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
     get().guard(async () => {
       set(single({ id: `file-${f.path}`, path: f.path, name: f.name, content: f.content, savedContent: f.content, dirty: false }))
+      rememberFile(f.path)
       // 桌面端把工作区切到该文件所在目录，侧栏文件树跟着走
       if (isTauri) await fsApi.adoptParentOf(f.path)
     })
@@ -537,7 +587,10 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       await fsApi.remove(path, isDir)
       // 删的正好是当前编辑的文件 → 立刻收走，不要留一个指向不存在文件的标签
-      if (get().activeTab()?.path === path) set(single(makeBlank()))
+      if (get().activeTab()?.path === path) {
+        set(single(makeBlank()))
+        rememberFile(null)
+      }
       await get().loadDir(parentPath)
       // 删除成功不再弹提示：文件树里图标消失本身就是最直接的反馈，
       // 顶部横幅只会造成干扰。失败仍走下面的 error 分支。
@@ -571,6 +624,19 @@ export const useStore = create<AppState>((set, get) => ({
           return t
         }),
       }))
+      // 「上次页面」记录同步迁移，否则重启后恢复不到改名后的文件
+      try {
+        const rem = localStorage.getItem(LAST_FILE_KEY)
+        if (rem) {
+          const prefix = path + sep
+          if (rem === path) rememberFile(newPath)
+          else if (isDir && rem.startsWith(prefix)) {
+            rememberFile(newPath + sep + rem.slice(prefix.length))
+          }
+        }
+      } catch {
+        /* 存储不可用时忽略 */
+      }
       // 目录改名后，旧路径及其整棵子树的 dirs / expanded 缓存全部失效
       if (isDir) {
         const prefix = path + sep
@@ -651,6 +717,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
     get().guard(() => {
       set(single({ id: `file-${path}`, path, name, content, savedContent: content, dirty: false }))
+      rememberFile(path)
     })
   },
 
@@ -710,6 +777,7 @@ export const useStore = create<AppState>((set, get) => ({
         ),
         active: id,
       }))
+      rememberFile(p)
     } catch (e) {
       if (isAbort(e)) return
       set({ notice: { kind: 'error', text: `另存为失败：${errText(e)}` } })
